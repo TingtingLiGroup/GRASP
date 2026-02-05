@@ -11,6 +11,13 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - `grasp-tool cellplot` CLI command for quick visualization.
 - Repo-only tiny demo helpers under `scripts/` and `demo_pkl/`.
 
+## [0.1.1] - 2026-02-05
+
+### Changed
+
+- Update README so the PyPI long description matches the GitHub repo.
+- Exclude `demo_pkl/` from source distributions (repo-only demo asset).
+
 ## [0.1.0] - 2026-02-05
 
 ### Added

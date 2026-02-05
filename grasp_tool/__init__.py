@@ -14,4 +14,4 @@ try:
     __version__ = _pkg_version("grasp-tool")
 except PackageNotFoundError:
     # Fallback for editable/uninstalled usage.
-    __version__ = "0.1.0"
+    __version__ = "0.1.1"
