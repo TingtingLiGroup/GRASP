@@ -11,6 +11,15 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - `grasp-tool cellplot` CLI command for quick visualization.
 - Repo-only tiny demo helpers under `scripts/` and `demo_pkl/`.
 
+## [0.1.2] - 2026-02-05
+
+### Changed
+
+- Clarify training dependency installation in `README.md` (including a pip CUDA wheel example for CUDA 12.1).
+- Fix tutorial link in `README.md` to point to Read the Docs.
+- Require ground-truth labels at (cell, gene) granularity for clustering evaluation; document the expected label CSV format.
+- Make `grasp-tool train-moco --label_file` actually drive clustering evaluation, and simplify label loading accordingly.
+
 ## [0.1.1] - 2026-02-05
 
 ### Changed

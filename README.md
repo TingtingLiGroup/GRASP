@@ -13,7 +13,7 @@ Note: This codebase was uploaded along with the manuscript for peer review. The 
 
 Check out the tutorial pages for demos and documentation:
 
-- https://grasp-lilab.github.io/GRASP/
+- https://grasp-lilab.readthedocs.io/en/latest/index.html
 
 ## Contact
 
@@ -149,14 +149,27 @@ If you want to run training-related commands:
 - `build-train-pkl` (needs `torch` + `torch-geometric`)
 - `train-moco` (needs `torch` + `torch-geometric`)
 
-Install them following the official PyTorch / PyTorch Geometric (PyG) instructions.
-We recommend installing them via conda inside the same env.
+Install them following the official PyTorch / PyTorch Geometric (PyG) instructions:
 
-Install PyTorch (pick one based on your setup):
+- PyTorch: https://pytorch.org/get-started/locally/
+- PyG: https://pytorch-geometric.readthedocs.io/en/latest/notes/installation.html
 
-- Official selector: https://pytorch.org/get-started/locally/
+We provide two practical options below (pick one).
 
-Examples:
+Option A (pip wheels; tested on Linux x86_64 + CUDA 12.1):
+
+```bash
+# Install PyTorch (CUDA 12.1 example)
+pip install --no-cache-dir torch==2.2.2 torchvision==0.17.2 torchaudio==2.2.2 \
+  --index-url https://download.pytorch.org/whl/cu121
+
+# Install PyTorch Geometric (PyG) wheels matching torch + CUDA
+pip install --no-cache-dir pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv \
+  -f https://data.pyg.org/whl/torch-2.2.2+cu121.html
+pip install --no-cache-dir torch-geometric
+```
+
+Option B (conda):
 
 ```bash
 # CPU-only
@@ -166,15 +179,7 @@ conda install -c pytorch pytorch torchvision torchaudio cpuonly
 conda install -c pytorch -c nvidia pytorch torchvision torchaudio pytorch-cuda=12.1
 ```
 
-Install PyTorch Geometric (PyG):
-
-- Official guide: https://pytorch-geometric.readthedocs.io/en/latest/notes/installation.html
-
-Example:
-
-```bash
-pip install torch-geometric
-```
+Then install PyTorch Geometric (PyG) following the official guide (the exact command depends on your torch + CUDA build).
 
 Make sure the installed PyG build matches your PyTorch and CUDA versions.
 
@@ -350,7 +355,7 @@ python -m grasp_tool build-train-pkl \
 ### 5) Train (MoCo)
 
 Note: this stage requires `torch` and `torch-geometric`, which are NOT installed by
-`pip install grasp-tool`. Install them via conda first.
+`pip install grasp-tool`. Install them first (see "Training dependencies" above).
 
 ```bash
 python -m grasp_tool train-moco \
@@ -374,6 +379,42 @@ python -m grasp_tool train-moco \
   --js 1 \
   --js_file outputs/portrait/js_distances_*.csv
 ```
+
+Optional: clustering evaluation with ground-truth labels
+
+If you have a ground-truth label CSV, you can enable clustering evaluation during training.
+This will compute ARI/NMI/Accuracy/Precision/Recall/F1 and write best_* summaries.
+
+Label CSV requirements:
+
+- Must include both `cell` and `gene` columns.
+  The embedding table is at (cell,gene) granularity, so labels must be joinable on (`cell`, `gene`).
+- Must include one label column. Recognized column names (highest priority first):
+  `groundtruth_wzx`, `groundtruth`, `label`, `location`, `cluster`, `category`, `type`.
+
+Example label file:
+
+```csv
+cell,gene,groundtruth
+10-0,SPTBN1,TypeA
+10-0,MALAT1,TypeA
+10-1,SPTBN1,TypeB
+```
+
+Run training with evaluation enabled:
+
+```bash
+python -m grasp_tool train-moco \
+  --dataset simulated1 \
+  --pkl outputs/train.pkl \
+  --num_clusters 8 \
+  --label_file /path/to/simulated1_label.csv
+```
+
+Notes:
+
+- `--num_clusters` enables clustering evaluation; if omitted, no clustering metrics are computed.
+- If the label file cannot be loaded, evaluation falls back to `unknown` labels (metrics will not be meaningful).
 
 ## Outputs
 
@@ -566,6 +607,7 @@ This command runs the packaged training entrypoint (`grasp_tool.cli.train_moco`)
 - `--num_epoch`, `--batch_size`: training schedule
 - `--cuda_device`: GPU index
 - `--num_clusters`: affects clustering evaluation (for very small datasets, set it <= num graphs)
+- `--label_file`: optional ground-truth label CSV path (used by clustering evaluation; see above)
 
 ## Reproducibility tips
 

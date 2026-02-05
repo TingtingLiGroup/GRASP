@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "grasp-tool"
-version = "0.1.1"
+version = "0.1.2"
 description = "GRASP: a graph-based representation learning toolkit for spatial transcriptomics"
 authors = ["wzx <unknown@example.com>"]
 readme = "README.md"

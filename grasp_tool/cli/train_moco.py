@@ -57,7 +57,7 @@ def _lazy_import_training_deps() -> None:
         if missing == "torch" or missing.startswith("torch_geometric"):
             raise ModuleNotFoundError(
                 "Missing training dependencies: torch and torch-geometric.\n"
-                "Install them first (recommended: conda), then re-run: grasp-tool train-moco ..."
+                "Install them first (conda or pip wheels), then re-run: grasp-tool train-moco ..."
             ) from e
         raise
 
@@ -158,7 +158,13 @@ def parse_args() -> argparse.Namespace:
         "--label_file",
         type=str,
         default=None,
-        help="Optional label file path (auto-discover if omitted)",
+        help=(
+            "Optional ground-truth label CSV path (absolute or relative). "
+            "Used by clustering evaluation when --num_clusters is set. "
+            "The label CSV must contain columns: cell, gene, and one label column (e.g. groundtruth). "
+            "Recognized label column names include: groundtruth_wzx, groundtruth, label, location, cluster, category, type. "
+            "If omitted, tries to auto-discover label files under common project paths."
+        ),
     )
     parser.add_argument(
         "--output_dir",
@@ -561,6 +567,7 @@ def train_model(args: argparse.Namespace) -> None:
                     args,
                     visualize=visualize,
                     clustering=clustering,
+                    specific_label_file=args.label_file,
                 )
 
             for epoch in range(1, args.num_epoch + 1):
@@ -617,6 +624,7 @@ def train_model(args: argparse.Namespace) -> None:
                             args,
                             visualize=visualize,
                             clustering=clustering,
+                            specific_label_file=args.label_file,
                         )
 
                     best_model_found = False

@@ -186,6 +186,8 @@ def load_location_data(df, dataset, graphs_number=None, specific_label_file=None
     priority_label_cols = [
         "groundtruth_wzx",
         "groundtruth",
+        "cell_type",
+        "celltype",
         "label",
         "location",
         "cluster",
@@ -212,23 +214,20 @@ def load_location_data(df, dataset, graphs_number=None, specific_label_file=None
     # Try to locate a label file.
     label_file = None
 
-    # Allow absolute paths.
-    # 1) If user provided an absolute path and it exists, use it directly.
-    if (
-        specific_label_file
-        and os.path.isabs(specific_label_file)
-        and os.path.exists(specific_label_file)
-    ):
-        label_file = specific_label_file
-        print(f"Using absolute label file path: {label_file}")
-    # 2) If user provided a relative filename, search under base_paths.
-    elif specific_label_file:
-        for base_path in base_paths:
-            path = f"{base_path}/{specific_label_file}"
-            if os.path.exists(path):
-                label_file = path
-                print(f"Using specified label file: {label_file}")
-                break
+    # 1) If user provided a path (absolute or relative) and it exists, use it directly.
+    if specific_label_file:
+        candidate_path = os.path.expandvars(os.path.expanduser(specific_label_file))
+        if os.path.exists(candidate_path):
+            label_file = candidate_path
+            print(f"Using label file path: {label_file}")
+        else:
+            # 2) If user provided a relative filename, search under base_paths.
+            for base_path in base_paths:
+                path = os.path.join(base_path, specific_label_file)
+                if os.path.exists(path):
+                    label_file = path
+                    print(f"Using specified label file: {label_file}")
+                    break
 
     # If no specific file was found, try common naming patterns.
     if label_file is None:
@@ -279,201 +278,43 @@ def load_location_data(df, dataset, graphs_number=None, specific_label_file=None
                 print("Warning: No recognized label column found in label file")
                 primary_label_col = None
 
-            # Robustly infer label file format.
-            # Long format: has 'cell' and 'gene' columns (+ one or more label columns).
-            # Wide format: one row per cell, many gene columns.
+            # GRASP evaluation expects labels at (cell, gene) granularity.
+            # Require a long-format label file with both 'cell' and 'gene' columns.
 
-            if "cell" in label_df.columns and "gene" in label_df.columns:
-                print(f"Detected long format label file")
+            if primary_label_col is None:
+                print("Error: No recognized label column found in label file")
+                df["location"] = "unknown"
+                return df
 
-                # Keep only required columns.
-                keep_cols = ["cell", "gene"] + found_label_cols
-                # Only keep columns that exist.
-                label_df = label_df[
-                    [col for col in keep_cols if col in label_df.columns]
-                ]
-
-                # Merge into input dataframe.
-                try:
-                    merged_df = df.merge(label_df, on=["gene", "cell"], how="left")
-                    print(f"Merged on both 'gene' and 'cell' columns")
-                except Exception as e:
-                    print(f"Error in gene+cell merge: {e}, trying cell-only merge")
-                    try:
-                        # Fallback to merging only on 'cell'.
-                        merged_df = df.merge(label_df, on=["cell"], how="left")
-                        print(f"Merged on 'cell' column only")
-                    except Exception as e2:
-                        print(f"All merge attempts failed: {e2}")
-                        # Fallback to default location.
-                        df["location"] = "unknown"
-                        return df
-
-                # Normalize the primary label column to 'location' (if needed).
-                if primary_label_col and primary_label_col != "location":
-                    if primary_label_col in merged_df.columns:
-                        print(f"Renaming '{primary_label_col}' to 'location'")
-                        merged_df["location"] = merged_df[primary_label_col]
-
-                # Ensure 'location' exists.
-                if "location" not in merged_df.columns:
-                    print("Creating 'location' column from highest priority label")
-                    if found_label_cols:
-                        merged_df["location"] = merged_df[found_label_cols[0]]
-                    else:
-                        print("Warning: No label columns found, using 'unknown'")
-                        merged_df["location"] = "unknown"
-
-                merged_df["location"] = merged_df["location"].fillna("unknown")
-                print(f"Merged data, final shape: {merged_df.shape}")
-
-                # Print label distribution.
-                label_counts = merged_df["location"].value_counts()
-                print(f"Label distribution (top 10): \n{label_counts.head(10)}")
-
-                return merged_df
-
-            # Wide format: row is a cell, columns are genes (and possibly metadata).
-            elif "cell" in label_df.columns and len(label_df.columns) > 2:
+            required_cols = ["cell", "gene", primary_label_col]
+            missing_required = [c for c in required_cols if c not in label_df.columns]
+            if missing_required:
                 print(
-                    f"Detected wide format label file, columns: {label_df.columns.tolist()}"
+                    "Error: Label file must contain columns: "
+                    f"{required_cols}. Missing: {missing_required}"
                 )
+                df["location"] = "unknown"
+                return df
 
-                # Confirm it looks like a typical wide format with gene columns.
-                non_gene_cols = ["cell", "Cell"] + priority_label_cols
-                potential_gene_cols = [
-                    col for col in label_df.columns if col not in non_gene_cols
-                ]
+            print("Detected long format label file (cell+gene)")
+            label_subset = label_df[["cell", "gene", primary_label_col]].copy()
 
-                # Heuristic: treat as wide format if there are many gene columns.
-                if len(potential_gene_cols) > 5:  # assume at least 5 gene columns
-                    print(
-                        f"Converting wide format to long format with {len(potential_gene_cols)} gene columns"
-                    )
+            try:
+                merged_df = df.merge(label_subset, on=["gene", "cell"], how="left")
+                print("Merged on both 'gene' and 'cell' columns")
+            except Exception as e:
+                print(f"Error in gene+cell merge: {e}")
+                df["location"] = "unknown"
+                return df
 
-                    # Preserve non-gene columns for later merge.
-                    cell_info_cols = []
-                    if primary_label_col:
-                        cell_info_cols = [primary_label_col]
-                    else:
-                        # If no label column is found, keep all non-gene columns.
-                        cell_info_cols = [
-                            col
-                            for col in non_gene_cols
-                            if col in label_df.columns and col != "cell"
-                        ]
+            merged_df["location"] = merged_df[primary_label_col]
+            merged_df["location"] = merged_df["location"].fillna("unknown")
+            print(f"Merged data, final shape: {merged_df.shape}")
 
-                    cell_info_df = None
-                    if cell_info_cols:
-                        cell_info_df = label_df[["cell"] + cell_info_cols].copy()
-                        print(f"Preserved cell information columns: {cell_info_cols}")
+            label_counts = merged_df["location"].value_counts()
+            print(f"Label distribution (top 10): \n{label_counts.head(10)}")
 
-                    # Convert wide -> long.
-                    long_df = pd.melt(
-                        label_df,
-                        id_vars="cell",
-                        value_vars=potential_gene_cols,
-                        var_name="gene",
-                        value_name="gene_value",
-                    )
-
-                    # Merge into input dataframe.
-                    try:
-                        merged_df = df.merge(long_df, on=["gene", "cell"], how="left")
-                        print(f"Merged gene-cell data")
-                    except Exception as e:
-                        print(f"Error in gene-cell merge for wide format: {e}")
-                        # Fallback to default location.
-                        df["location"] = "unknown"
-                        return df
-
-                    # Merge preserved cell info columns (if any).
-                    if cell_info_df is not None:
-                        try:
-                            merged_df = merged_df.merge(
-                                cell_info_df, on="cell", how="left"
-                            )
-                            print(f"Added cell information columns")
-                        except Exception as e:
-                            print(f"Error merging cell info: {e}")
-
-                    # Set 'location' column.
-                    if primary_label_col and primary_label_col in merged_df.columns:
-                        merged_df["location"] = merged_df[primary_label_col]
-                        print(f"Set 'location' from '{primary_label_col}'")
-                    else:
-                        # Fallback to 'gene_value'.
-                        merged_df["location"] = merged_df["gene_value"]
-                        print(f"Set 'location' from gene_value column")
-
-                    # Ensure 'location' has values.
-                    merged_df["location"] = merged_df["location"].fillna("unknown")
-                    print(
-                        f"Merged data from wide format, final shape: {merged_df.shape}"
-                    )
-
-                    # Print label distribution.
-                    label_counts = merged_df["location"].value_counts()
-                    print(f"Label distribution (top 10): \n{label_counts.head(10)}")
-
-                    return merged_df
-                else:
-                    print(
-                        f"Label file has 'cell' column but doesn't appear to be a typical wide format"
-                    )
-
-                    # Try merging based on 'cell'.
-                    try:
-                        # Use discovered label columns.
-                        useful_cols = ["cell"]
-                        if found_label_cols:
-                            useful_cols.extend(found_label_cols)
-                        else:
-                            # If no label columns are found, keep all likely label cols.
-                            useful_cols.extend(
-                                [
-                                    col
-                                    for col in label_df.columns
-                                    if col in priority_label_cols
-                                    or col not in non_gene_cols
-                                ]
-                            )
-
-                        # Only keep existing columns.
-                        label_subset = label_df[
-                            [col for col in useful_cols if col in label_df.columns]
-                        ].copy()
-
-                        # Merge.
-                        merged_df = df.merge(label_subset, on="cell", how="left")
-
-                        # Set 'location' column.
-                        if primary_label_col and primary_label_col in merged_df.columns:
-                            merged_df["location"] = merged_df[primary_label_col]
-                            print(f"Set 'location' from '{primary_label_col}'")
-                        else:
-                            # If no primary label column is available, use default.
-                            print("No primary label column available")
-                            merged_df["location"] = "unknown"
-
-                        merged_df["location"] = merged_df["location"].fillna("unknown")
-
-                        print(
-                            f"Merged data using cell-based join, final shape: {merged_df.shape}"
-                        )
-
-                        # Print label distribution.
-                        label_counts = merged_df["location"].value_counts()
-                        print(f"Label distribution (top 10): \n{label_counts.head(10)}")
-
-                        return merged_df
-                    except Exception as e:
-                        print(f"Error in cell-based merge: {e}")
-
-            # Unrecognized format.
-            print(f"Unrecognized label file format, using default 'unknown' location")
-            df["location"] = "unknown"
-            return df
+            return merged_df
 
         except Exception as e:
             print(f"Error processing label file {label_file}: {e}")

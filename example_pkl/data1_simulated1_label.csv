@@ -1,0 +1,801 @@
+cell,gene,groundtruth,type
+cell_11,gene_0_0_0,Random,type1
+cell_11,gene_0_1_0,Random,type1
+cell_11,gene_0_2_0,Random,type1
+cell_11,gene_0_3_0,Random,type1
+cell_11,gene_0_4_0,Random,type1
+cell_11,gene_1_0_0,Foci,type1
+cell_11,gene_1_1_0,Foci,type1
+cell_11,gene_1_2_0,Foci,type1
+cell_11,gene_1_3_0,Foci,type1
+cell_11,gene_1_4_0,Foci,type1
+cell_11,gene_2_0_0,Nuclear,type1
+cell_11,gene_2_1_0,Nuclear,type1
+cell_11,gene_2_2_0,Nuclear,type1
+cell_11,gene_2_3_0,Nuclear,type1
+cell_11,gene_2_4_0,Nuclear,type1
+cell_11,gene_3_0_0,Cytoplasmic,type1
+cell_11,gene_3_1_0,Cytoplasmic,type1
+cell_11,gene_3_2_0,Cytoplasmic,type1
+cell_11,gene_3_3_0,Cytoplasmic,type1
+cell_11,gene_3_4_0,Cytoplasmic,type1
+cell_11,gene_4_0_0,Nuclear edge,type1
+cell_11,gene_4_1_0,Nuclear edge,type1
+cell_11,gene_4_2_0,Nuclear edge,type1
+cell_11,gene_4_3_0,Nuclear edge,type1
+cell_11,gene_4_4_0,Nuclear edge,type1
+cell_11,gene_5_0_0,Cell edge,type1
+cell_11,gene_5_1_0,Cell edge,type1
+cell_11,gene_5_2_0,Cell edge,type1
+cell_11,gene_5_3_0,Cell edge,type1
+cell_11,gene_5_4_0,Cell edge,type1
+cell_11,gene_6_0_0,Protrusion,type1
+cell_11,gene_6_1_0,Protrusion,type1
+cell_11,gene_6_2_0,Protrusion,type1
+cell_11,gene_6_3_0,Protrusion,type1
+cell_11,gene_6_4_0,Protrusion,type1
+cell_11,gene_7_0_0,Radial,type1
+cell_11,gene_7_1_0,Radial,type1
+cell_11,gene_7_2_0,Radial,type1
+cell_11,gene_7_3_0,Radial,type1
+cell_11,gene_7_4_0,Radial,type1
+cell_11,gene_0_0_1,Random,type1
+cell_11,gene_0_1_1,Random,type1
+cell_11,gene_0_2_1,Random,type1
+cell_11,gene_0_3_1,Random,type1
+cell_11,gene_0_4_1,Random,type1
+cell_11,gene_1_0_1,Foci,type1
+cell_11,gene_1_1_1,Foci,type1
+cell_11,gene_1_2_1,Foci,type1
+cell_11,gene_1_3_1,Foci,type1
+cell_11,gene_1_4_1,Foci,type1
+cell_11,gene_2_0_1,Nuclear,type1
+cell_11,gene_2_1_1,Nuclear,type1
+cell_11,gene_2_2_1,Nuclear,type1
+cell_11,gene_2_3_1,Nuclear,type1
+cell_11,gene_2_4_1,Nuclear,type1
+cell_11,gene_3_0_1,Cytoplasmic,type1
+cell_11,gene_3_1_1,Cytoplasmic,type1
+cell_11,gene_3_2_1,Cytoplasmic,type1
+cell_11,gene_3_3_1,Cytoplasmic,type1
+cell_11,gene_3_4_1,Cytoplasmic,type1
+cell_11,gene_4_0_1,Nuclear edge,type1
+cell_11,gene_4_1_1,Nuclear edge,type1
+cell_11,gene_4_2_1,Nuclear edge,type1
+cell_11,gene_4_3_1,Nuclear edge,type1
+cell_11,gene_4_4_1,Nuclear edge,type1
+cell_11,gene_5_0_1,Cell edge,type1
+cell_11,gene_5_1_1,Cell edge,type1
+cell_11,gene_5_2_1,Cell edge,type1
+cell_11,gene_5_3_1,Cell edge,type1
+cell_11,gene_5_4_1,Cell edge,type1
+cell_11,gene_6_0_1,Protrusion,type1
+cell_11,gene_6_1_1,Protrusion,type1
+cell_11,gene_6_2_1,Protrusion,type1
+cell_11,gene_6_3_1,Protrusion,type1
+cell_11,gene_6_4_1,Protrusion,type1
+cell_11,gene_7_0_1,Radial,type1
+cell_11,gene_7_1_1,Radial,type1
+cell_11,gene_7_2_1,Radial,type1
+cell_11,gene_7_3_1,Radial,type1
+cell_11,gene_7_4_1,Radial,type1
+cell_135,gene_0_0_0,Random,type1
+cell_135,gene_0_1_0,Random,type1
+cell_135,gene_0_2_0,Random,type1
+cell_135,gene_0_3_0,Random,type1
+cell_135,gene_0_4_0,Random,type1
+cell_135,gene_1_0_0,Foci,type1
+cell_135,gene_1_1_0,Foci,type1
+cell_135,gene_1_2_0,Foci,type1
+cell_135,gene_1_3_0,Foci,type1
+cell_135,gene_1_4_0,Foci,type1
+cell_135,gene_2_0_0,Nuclear,type1
+cell_135,gene_2_1_0,Nuclear,type1
+cell_135,gene_2_2_0,Nuclear,type1
+cell_135,gene_2_3_0,Nuclear,type1
+cell_135,gene_2_4_0,Nuclear,type1
+cell_135,gene_3_0_0,Cytoplasmic,type1
+cell_135,gene_3_1_0,Cytoplasmic,type1
+cell_135,gene_3_2_0,Cytoplasmic,type1
+cell_135,gene_3_3_0,Cytoplasmic,type1
+cell_135,gene_3_4_0,Cytoplasmic,type1
+cell_135,gene_4_0_0,Nuclear edge,type1
+cell_135,gene_4_1_0,Nuclear edge,type1
+cell_135,gene_4_2_0,Nuclear edge,type1
+cell_135,gene_4_3_0,Nuclear edge,type1
+cell_135,gene_4_4_0,Nuclear edge,type1
+cell_135,gene_5_0_0,Cell edge,type1
+cell_135,gene_5_1_0,Cell edge,type1
+cell_135,gene_5_2_0,Cell edge,type1
+cell_135,gene_5_3_0,Cell edge,type1
+cell_135,gene_5_4_0,Cell edge,type1
+cell_135,gene_6_0_0,Protrusion,type1
+cell_135,gene_6_1_0,Protrusion,type1
+cell_135,gene_6_2_0,Protrusion,type1
+cell_135,gene_6_3_0,Protrusion,type1
+cell_135,gene_6_4_0,Protrusion,type1
+cell_135,gene_7_0_0,Radial,type1
+cell_135,gene_7_1_0,Radial,type1
+cell_135,gene_7_2_0,Radial,type1
+cell_135,gene_7_3_0,Radial,type1
+cell_135,gene_7_4_0,Radial,type1
+cell_135,gene_0_0_1,Random,type1
+cell_135,gene_0_1_1,Random,type1
+cell_135,gene_0_2_1,Random,type1
+cell_135,gene_0_3_1,Random,type1
+cell_135,gene_0_4_1,Random,type1
+cell_135,gene_1_0_1,Foci,type1
+cell_135,gene_1_1_1,Foci,type1
+cell_135,gene_1_2_1,Foci,type1
+cell_135,gene_1_3_1,Foci,type1
+cell_135,gene_1_4_1,Foci,type1
+cell_135,gene_2_0_1,Nuclear,type1
+cell_135,gene_2_1_1,Nuclear,type1
+cell_135,gene_2_2_1,Nuclear,type1
+cell_135,gene_2_3_1,Nuclear,type1
+cell_135,gene_2_4_1,Nuclear,type1
+cell_135,gene_3_0_1,Cytoplasmic,type1
+cell_135,gene_3_1_1,Cytoplasmic,type1
+cell_135,gene_3_2_1,Cytoplasmic,type1
+cell_135,gene_3_3_1,Cytoplasmic,type1
+cell_135,gene_3_4_1,Cytoplasmic,type1
+cell_135,gene_4_0_1,Nuclear edge,type1
+cell_135,gene_4_1_1,Nuclear edge,type1
+cell_135,gene_4_2_1,Nuclear edge,type1
+cell_135,gene_4_3_1,Nuclear edge,type1
+cell_135,gene_4_4_1,Nuclear edge,type1
+cell_135,gene_5_0_1,Cell edge,type1
+cell_135,gene_5_1_1,Cell edge,type1
+cell_135,gene_5_2_1,Cell edge,type1
+cell_135,gene_5_3_1,Cell edge,type1
+cell_135,gene_5_4_1,Cell edge,type1
+cell_135,gene_6_0_1,Protrusion,type1
+cell_135,gene_6_1_1,Protrusion,type1
+cell_135,gene_6_2_1,Protrusion,type1
+cell_135,gene_6_3_1,Protrusion,type1
+cell_135,gene_6_4_1,Protrusion,type1
+cell_135,gene_7_0_1,Radial,type1
+cell_135,gene_7_1_1,Radial,type1
+cell_135,gene_7_2_1,Radial,type1
+cell_135,gene_7_3_1,Radial,type1
+cell_135,gene_7_4_1,Radial,type1
+cell_154,gene_0_0_0,Random,type1
+cell_154,gene_0_1_0,Random,type1
+cell_154,gene_0_2_0,Random,type1
+cell_154,gene_0_3_0,Random,type1
+cell_154,gene_0_4_0,Random,type1
+cell_154,gene_1_0_0,Foci,type1
+cell_154,gene_1_1_0,Foci,type1
+cell_154,gene_1_2_0,Foci,type1
+cell_154,gene_1_3_0,Foci,type1
+cell_154,gene_1_4_0,Foci,type1
+cell_154,gene_2_0_0,Nuclear,type1
+cell_154,gene_2_1_0,Nuclear,type1
+cell_154,gene_2_2_0,Nuclear,type1
+cell_154,gene_2_3_0,Nuclear,type1
+cell_154,gene_2_4_0,Nuclear,type1
+cell_154,gene_3_0_0,Cytoplasmic,type1
+cell_154,gene_3_1_0,Cytoplasmic,type1
+cell_154,gene_3_2_0,Cytoplasmic,type1
+cell_154,gene_3_3_0,Cytoplasmic,type1
+cell_154,gene_3_4_0,Cytoplasmic,type1
+cell_154,gene_4_0_0,Nuclear edge,type1
+cell_154,gene_4_1_0,Nuclear edge,type1
+cell_154,gene_4_2_0,Nuclear edge,type1
+cell_154,gene_4_3_0,Nuclear edge,type1
+cell_154,gene_4_4_0,Nuclear edge,type1
+cell_154,gene_5_0_0,Cell edge,type1
+cell_154,gene_5_1_0,Cell edge,type1
+cell_154,gene_5_2_0,Cell edge,type1
+cell_154,gene_5_3_0,Cell edge,type1
+cell_154,gene_5_4_0,Cell edge,type1
+cell_154,gene_6_0_0,Protrusion,type1
+cell_154,gene_6_1_0,Protrusion,type1
+cell_154,gene_6_2_0,Protrusion,type1
+cell_154,gene_6_3_0,Protrusion,type1
+cell_154,gene_6_4_0,Protrusion,type1
+cell_154,gene_7_0_0,Radial,type1
+cell_154,gene_7_1_0,Radial,type1
+cell_154,gene_7_2_0,Radial,type1
+cell_154,gene_7_3_0,Radial,type1
+cell_154,gene_7_4_0,Radial,type1
+cell_154,gene_0_0_1,Random,type1
+cell_154,gene_0_1_1,Random,type1
+cell_154,gene_0_2_1,Random,type1
+cell_154,gene_0_3_1,Random,type1
+cell_154,gene_0_4_1,Random,type1
+cell_154,gene_1_0_1,Foci,type1
+cell_154,gene_1_1_1,Foci,type1
+cell_154,gene_1_2_1,Foci,type1
+cell_154,gene_1_3_1,Foci,type1
+cell_154,gene_1_4_1,Foci,type1
+cell_154,gene_2_0_1,Nuclear,type1
+cell_154,gene_2_1_1,Nuclear,type1
+cell_154,gene_2_2_1,Nuclear,type1
+cell_154,gene_2_3_1,Nuclear,type1
+cell_154,gene_2_4_1,Nuclear,type1
+cell_154,gene_3_0_1,Cytoplasmic,type1
+cell_154,gene_3_1_1,Cytoplasmic,type1
+cell_154,gene_3_2_1,Cytoplasmic,type1
+cell_154,gene_3_3_1,Cytoplasmic,type1
+cell_154,gene_3_4_1,Cytoplasmic,type1
+cell_154,gene_4_0_1,Nuclear edge,type1
+cell_154,gene_4_1_1,Nuclear edge,type1
+cell_154,gene_4_2_1,Nuclear edge,type1
+cell_154,gene_4_3_1,Nuclear edge,type1
+cell_154,gene_4_4_1,Nuclear edge,type1
+cell_154,gene_5_0_1,Cell edge,type1
+cell_154,gene_5_1_1,Cell edge,type1
+cell_154,gene_5_2_1,Cell edge,type1
+cell_154,gene_5_3_1,Cell edge,type1
+cell_154,gene_5_4_1,Cell edge,type1
+cell_154,gene_6_0_1,Protrusion,type1
+cell_154,gene_6_1_1,Protrusion,type1
+cell_154,gene_6_2_1,Protrusion,type1
+cell_154,gene_6_3_1,Protrusion,type1
+cell_154,gene_6_4_1,Protrusion,type1
+cell_154,gene_7_0_1,Radial,type1
+cell_154,gene_7_1_1,Radial,type1
+cell_154,gene_7_2_1,Radial,type1
+cell_154,gene_7_3_1,Radial,type1
+cell_154,gene_7_4_1,Radial,type1
+cell_158,gene_0_0_0,Random,type1
+cell_158,gene_0_1_0,Random,type1
+cell_158,gene_0_2_0,Random,type1
+cell_158,gene_0_3_0,Random,type1
+cell_158,gene_0_4_0,Random,type1
+cell_158,gene_1_0_0,Foci,type1
+cell_158,gene_1_1_0,Foci,type1
+cell_158,gene_1_2_0,Foci,type1
+cell_158,gene_1_3_0,Foci,type1
+cell_158,gene_1_4_0,Foci,type1
+cell_158,gene_2_0_0,Nuclear,type1
+cell_158,gene_2_1_0,Nuclear,type1
+cell_158,gene_2_2_0,Nuclear,type1
+cell_158,gene_2_3_0,Nuclear,type1
+cell_158,gene_2_4_0,Nuclear,type1
+cell_158,gene_3_0_0,Cytoplasmic,type1
+cell_158,gene_3_1_0,Cytoplasmic,type1
+cell_158,gene_3_2_0,Cytoplasmic,type1
+cell_158,gene_3_3_0,Cytoplasmic,type1
+cell_158,gene_3_4_0,Cytoplasmic,type1
+cell_158,gene_4_0_0,Nuclear edge,type1
+cell_158,gene_4_1_0,Nuclear edge,type1
+cell_158,gene_4_2_0,Nuclear edge,type1
+cell_158,gene_4_3_0,Nuclear edge,type1
+cell_158,gene_4_4_0,Nuclear edge,type1
+cell_158,gene_5_0_0,Cell edge,type1
+cell_158,gene_5_1_0,Cell edge,type1
+cell_158,gene_5_2_0,Cell edge,type1
+cell_158,gene_5_3_0,Cell edge,type1
+cell_158,gene_5_4_0,Cell edge,type1
+cell_158,gene_6_0_0,Protrusion,type1
+cell_158,gene_6_1_0,Protrusion,type1
+cell_158,gene_6_2_0,Protrusion,type1
+cell_158,gene_6_3_0,Protrusion,type1
+cell_158,gene_6_4_0,Protrusion,type1
+cell_158,gene_7_0_0,Radial,type1
+cell_158,gene_7_1_0,Radial,type1
+cell_158,gene_7_2_0,Radial,type1
+cell_158,gene_7_3_0,Radial,type1
+cell_158,gene_7_4_0,Radial,type1
+cell_158,gene_0_0_1,Random,type1
+cell_158,gene_0_1_1,Random,type1
+cell_158,gene_0_2_1,Random,type1
+cell_158,gene_0_3_1,Random,type1
+cell_158,gene_0_4_1,Random,type1
+cell_158,gene_1_0_1,Foci,type1
+cell_158,gene_1_1_1,Foci,type1
+cell_158,gene_1_2_1,Foci,type1
+cell_158,gene_1_3_1,Foci,type1
+cell_158,gene_1_4_1,Foci,type1
+cell_158,gene_2_0_1,Nuclear,type1
+cell_158,gene_2_1_1,Nuclear,type1
+cell_158,gene_2_2_1,Nuclear,type1
+cell_158,gene_2_3_1,Nuclear,type1
+cell_158,gene_2_4_1,Nuclear,type1
+cell_158,gene_3_0_1,Cytoplasmic,type1
+cell_158,gene_3_1_1,Cytoplasmic,type1
+cell_158,gene_3_2_1,Cytoplasmic,type1
+cell_158,gene_3_3_1,Cytoplasmic,type1
+cell_158,gene_3_4_1,Cytoplasmic,type1
+cell_158,gene_4_0_1,Nuclear edge,type1
+cell_158,gene_4_1_1,Nuclear edge,type1
+cell_158,gene_4_2_1,Nuclear edge,type1
+cell_158,gene_4_3_1,Nuclear edge,type1
+cell_158,gene_4_4_1,Nuclear edge,type1
+cell_158,gene_5_0_1,Cell edge,type1
+cell_158,gene_5_1_1,Cell edge,type1
+cell_158,gene_5_2_1,Cell edge,type1
+cell_158,gene_5_3_1,Cell edge,type1
+cell_158,gene_5_4_1,Cell edge,type1
+cell_158,gene_6_0_1,Protrusion,type1
+cell_158,gene_6_1_1,Protrusion,type1
+cell_158,gene_6_2_1,Protrusion,type1
+cell_158,gene_6_3_1,Protrusion,type1
+cell_158,gene_6_4_1,Protrusion,type1
+cell_158,gene_7_0_1,Radial,type1
+cell_158,gene_7_1_1,Radial,type1
+cell_158,gene_7_2_1,Radial,type1
+cell_158,gene_7_3_1,Radial,type1
+cell_158,gene_7_4_1,Radial,type1
+cell_202,gene_0_0_0,Random,type1
+cell_202,gene_0_1_0,Random,type1
+cell_202,gene_0_2_0,Random,type1
+cell_202,gene_0_3_0,Random,type1
+cell_202,gene_0_4_0,Random,type1
+cell_202,gene_1_0_0,Foci,type1
+cell_202,gene_1_1_0,Foci,type1
+cell_202,gene_1_2_0,Foci,type1
+cell_202,gene_1_3_0,Foci,type1
+cell_202,gene_1_4_0,Foci,type1
+cell_202,gene_2_0_0,Nuclear,type1
+cell_202,gene_2_1_0,Nuclear,type1
+cell_202,gene_2_2_0,Nuclear,type1
+cell_202,gene_2_3_0,Nuclear,type1
+cell_202,gene_2_4_0,Nuclear,type1
+cell_202,gene_3_0_0,Cytoplasmic,type1
+cell_202,gene_3_1_0,Cytoplasmic,type1
+cell_202,gene_3_2_0,Cytoplasmic,type1
+cell_202,gene_3_3_0,Cytoplasmic,type1
+cell_202,gene_3_4_0,Cytoplasmic,type1
+cell_202,gene_4_0_0,Nuclear edge,type1
+cell_202,gene_4_1_0,Nuclear edge,type1
+cell_202,gene_4_2_0,Nuclear edge,type1
+cell_202,gene_4_3_0,Nuclear edge,type1
+cell_202,gene_4_4_0,Nuclear edge,type1
+cell_202,gene_5_0_0,Cell edge,type1
+cell_202,gene_5_1_0,Cell edge,type1
+cell_202,gene_5_2_0,Cell edge,type1
+cell_202,gene_5_3_0,Cell edge,type1
+cell_202,gene_5_4_0,Cell edge,type1
+cell_202,gene_6_0_0,Protrusion,type1
+cell_202,gene_6_1_0,Protrusion,type1
+cell_202,gene_6_2_0,Protrusion,type1
+cell_202,gene_6_3_0,Protrusion,type1
+cell_202,gene_6_4_0,Protrusion,type1
+cell_202,gene_7_0_0,Radial,type1
+cell_202,gene_7_1_0,Radial,type1
+cell_202,gene_7_2_0,Radial,type1
+cell_202,gene_7_3_0,Radial,type1
+cell_202,gene_7_4_0,Radial,type1
+cell_202,gene_0_0_1,Random,type1
+cell_202,gene_0_1_1,Random,type1
+cell_202,gene_0_2_1,Random,type1
+cell_202,gene_0_3_1,Random,type1
+cell_202,gene_0_4_1,Random,type1
+cell_202,gene_1_0_1,Foci,type1
+cell_202,gene_1_1_1,Foci,type1
+cell_202,gene_1_2_1,Foci,type1
+cell_202,gene_1_3_1,Foci,type1
+cell_202,gene_1_4_1,Foci,type1
+cell_202,gene_2_0_1,Nuclear,type1
+cell_202,gene_2_1_1,Nuclear,type1
+cell_202,gene_2_2_1,Nuclear,type1
+cell_202,gene_2_3_1,Nuclear,type1
+cell_202,gene_2_4_1,Nuclear,type1
+cell_202,gene_3_0_1,Cytoplasmic,type1
+cell_202,gene_3_1_1,Cytoplasmic,type1
+cell_202,gene_3_2_1,Cytoplasmic,type1
+cell_202,gene_3_3_1,Cytoplasmic,type1
+cell_202,gene_3_4_1,Cytoplasmic,type1
+cell_202,gene_4_0_1,Nuclear edge,type1
+cell_202,gene_4_1_1,Nuclear edge,type1
+cell_202,gene_4_2_1,Nuclear edge,type1
+cell_202,gene_4_3_1,Nuclear edge,type1
+cell_202,gene_4_4_1,Nuclear edge,type1
+cell_202,gene_5_0_1,Cell edge,type1
+cell_202,gene_5_1_1,Cell edge,type1
+cell_202,gene_5_2_1,Cell edge,type1
+cell_202,gene_5_3_1,Cell edge,type1
+cell_202,gene_5_4_1,Cell edge,type1
+cell_202,gene_6_0_1,Protrusion,type1
+cell_202,gene_6_1_1,Protrusion,type1
+cell_202,gene_6_2_1,Protrusion,type1
+cell_202,gene_6_3_1,Protrusion,type1
+cell_202,gene_6_4_1,Protrusion,type1
+cell_202,gene_7_0_1,Radial,type1
+cell_202,gene_7_1_1,Radial,type1
+cell_202,gene_7_2_1,Radial,type1
+cell_202,gene_7_3_1,Radial,type1
+cell_202,gene_7_4_1,Radial,type1
+cell_4,gene_0_0_0,Random,type1
+cell_4,gene_0_1_0,Random,type1
+cell_4,gene_0_2_0,Random,type1
+cell_4,gene_0_3_0,Random,type1
+cell_4,gene_0_4_0,Random,type1
+cell_4,gene_1_0_0,Foci,type1
+cell_4,gene_1_1_0,Foci,type1
+cell_4,gene_1_2_0,Foci,type1
+cell_4,gene_1_3_0,Foci,type1
+cell_4,gene_1_4_0,Foci,type1
+cell_4,gene_2_0_0,Nuclear,type1
+cell_4,gene_2_1_0,Nuclear,type1
+cell_4,gene_2_2_0,Nuclear,type1
+cell_4,gene_2_3_0,Nuclear,type1
+cell_4,gene_2_4_0,Nuclear,type1
+cell_4,gene_3_0_0,Cytoplasmic,type1
+cell_4,gene_3_1_0,Cytoplasmic,type1
+cell_4,gene_3_2_0,Cytoplasmic,type1
+cell_4,gene_3_3_0,Cytoplasmic,type1
+cell_4,gene_3_4_0,Cytoplasmic,type1
+cell_4,gene_4_0_0,Nuclear edge,type1
+cell_4,gene_4_1_0,Nuclear edge,type1
+cell_4,gene_4_2_0,Nuclear edge,type1
+cell_4,gene_4_3_0,Nuclear edge,type1
+cell_4,gene_4_4_0,Nuclear edge,type1
+cell_4,gene_5_0_0,Cell edge,type1
+cell_4,gene_5_1_0,Cell edge,type1
+cell_4,gene_5_2_0,Cell edge,type1
+cell_4,gene_5_3_0,Cell edge,type1
+cell_4,gene_5_4_0,Cell edge,type1
+cell_4,gene_6_0_0,Protrusion,type1
+cell_4,gene_6_1_0,Protrusion,type1
+cell_4,gene_6_2_0,Protrusion,type1
+cell_4,gene_6_3_0,Protrusion,type1
+cell_4,gene_6_4_0,Protrusion,type1
+cell_4,gene_7_0_0,Radial,type1
+cell_4,gene_7_1_0,Radial,type1
+cell_4,gene_7_2_0,Radial,type1
+cell_4,gene_7_3_0,Radial,type1
+cell_4,gene_7_4_0,Radial,type1
+cell_4,gene_0_0_1,Random,type1
+cell_4,gene_0_1_1,Random,type1
+cell_4,gene_0_2_1,Random,type1
+cell_4,gene_0_3_1,Random,type1
+cell_4,gene_0_4_1,Random,type1
+cell_4,gene_1_0_1,Foci,type1
+cell_4,gene_1_1_1,Foci,type1
+cell_4,gene_1_2_1,Foci,type1
+cell_4,gene_1_3_1,Foci,type1
+cell_4,gene_1_4_1,Foci,type1
+cell_4,gene_2_0_1,Nuclear,type1
+cell_4,gene_2_1_1,Nuclear,type1
+cell_4,gene_2_2_1,Nuclear,type1
+cell_4,gene_2_3_1,Nuclear,type1
+cell_4,gene_2_4_1,Nuclear,type1
+cell_4,gene_3_0_1,Cytoplasmic,type1
+cell_4,gene_3_1_1,Cytoplasmic,type1
+cell_4,gene_3_2_1,Cytoplasmic,type1
+cell_4,gene_3_3_1,Cytoplasmic,type1
+cell_4,gene_3_4_1,Cytoplasmic,type1
+cell_4,gene_4_0_1,Nuclear edge,type1
+cell_4,gene_4_1_1,Nuclear edge,type1
+cell_4,gene_4_2_1,Nuclear edge,type1
+cell_4,gene_4_3_1,Nuclear edge,type1
+cell_4,gene_4_4_1,Nuclear edge,type1
+cell_4,gene_5_0_1,Cell edge,type1
+cell_4,gene_5_1_1,Cell edge,type1
+cell_4,gene_5_2_1,Cell edge,type1
+cell_4,gene_5_3_1,Cell edge,type1
+cell_4,gene_5_4_1,Cell edge,type1
+cell_4,gene_6_0_1,Protrusion,type1
+cell_4,gene_6_1_1,Protrusion,type1
+cell_4,gene_6_2_1,Protrusion,type1
+cell_4,gene_6_3_1,Protrusion,type1
+cell_4,gene_6_4_1,Protrusion,type1
+cell_4,gene_7_0_1,Radial,type1
+cell_4,gene_7_1_1,Radial,type1
+cell_4,gene_7_2_1,Radial,type1
+cell_4,gene_7_3_1,Radial,type1
+cell_4,gene_7_4_1,Radial,type1
+cell_307,gene_0_0_0,Random,type1
+cell_307,gene_0_1_0,Random,type1
+cell_307,gene_0_2_0,Random,type1
+cell_307,gene_0_3_0,Random,type1
+cell_307,gene_0_4_0,Random,type1
+cell_307,gene_1_0_0,Foci,type1
+cell_307,gene_1_1_0,Foci,type1
+cell_307,gene_1_2_0,Foci,type1
+cell_307,gene_1_3_0,Foci,type1
+cell_307,gene_1_4_0,Foci,type1
+cell_307,gene_2_0_0,Nuclear,type1
+cell_307,gene_2_1_0,Nuclear,type1
+cell_307,gene_2_2_0,Nuclear,type1
+cell_307,gene_2_3_0,Nuclear,type1
+cell_307,gene_2_4_0,Nuclear,type1
+cell_307,gene_3_0_0,Cytoplasmic,type1
+cell_307,gene_3_1_0,Cytoplasmic,type1
+cell_307,gene_3_2_0,Cytoplasmic,type1
+cell_307,gene_3_3_0,Cytoplasmic,type1
+cell_307,gene_3_4_0,Cytoplasmic,type1
+cell_307,gene_4_0_0,Nuclear edge,type1
+cell_307,gene_4_1_0,Nuclear edge,type1
+cell_307,gene_4_2_0,Nuclear edge,type1
+cell_307,gene_4_3_0,Nuclear edge,type1
+cell_307,gene_4_4_0,Nuclear edge,type1
+cell_307,gene_5_0_0,Cell edge,type1
+cell_307,gene_5_1_0,Cell edge,type1
+cell_307,gene_5_2_0,Cell edge,type1
+cell_307,gene_5_3_0,Cell edge,type1
+cell_307,gene_5_4_0,Cell edge,type1
+cell_307,gene_6_0_0,Protrusion,type1
+cell_307,gene_6_1_0,Protrusion,type1
+cell_307,gene_6_2_0,Protrusion,type1
+cell_307,gene_6_3_0,Protrusion,type1
+cell_307,gene_6_4_0,Protrusion,type1
+cell_307,gene_7_0_0,Radial,type1
+cell_307,gene_7_1_0,Radial,type1
+cell_307,gene_7_2_0,Radial,type1
+cell_307,gene_7_3_0,Radial,type1
+cell_307,gene_7_4_0,Radial,type1
+cell_307,gene_0_0_1,Random,type1
+cell_307,gene_0_1_1,Random,type1
+cell_307,gene_0_2_1,Random,type1
+cell_307,gene_0_3_1,Random,type1
+cell_307,gene_0_4_1,Random,type1
+cell_307,gene_1_0_1,Foci,type1
+cell_307,gene_1_1_1,Foci,type1
+cell_307,gene_1_2_1,Foci,type1
+cell_307,gene_1_3_1,Foci,type1
+cell_307,gene_1_4_1,Foci,type1
+cell_307,gene_2_0_1,Nuclear,type1
+cell_307,gene_2_1_1,Nuclear,type1
+cell_307,gene_2_2_1,Nuclear,type1
+cell_307,gene_2_3_1,Nuclear,type1
+cell_307,gene_2_4_1,Nuclear,type1
+cell_307,gene_3_0_1,Cytoplasmic,type1
+cell_307,gene_3_1_1,Cytoplasmic,type1
+cell_307,gene_3_2_1,Cytoplasmic,type1
+cell_307,gene_3_3_1,Cytoplasmic,type1
+cell_307,gene_3_4_1,Cytoplasmic,type1
+cell_307,gene_4_0_1,Nuclear edge,type1
+cell_307,gene_4_1_1,Nuclear edge,type1
+cell_307,gene_4_2_1,Nuclear edge,type1
+cell_307,gene_4_3_1,Nuclear edge,type1
+cell_307,gene_4_4_1,Nuclear edge,type1
+cell_307,gene_5_0_1,Cell edge,type1
+cell_307,gene_5_1_1,Cell edge,type1
+cell_307,gene_5_2_1,Cell edge,type1
+cell_307,gene_5_3_1,Cell edge,type1
+cell_307,gene_5_4_1,Cell edge,type1
+cell_307,gene_6_0_1,Protrusion,type1
+cell_307,gene_6_1_1,Protrusion,type1
+cell_307,gene_6_2_1,Protrusion,type1
+cell_307,gene_6_3_1,Protrusion,type1
+cell_307,gene_6_4_1,Protrusion,type1
+cell_307,gene_7_0_1,Radial,type1
+cell_307,gene_7_1_1,Radial,type1
+cell_307,gene_7_2_1,Radial,type1
+cell_307,gene_7_3_1,Radial,type1
+cell_307,gene_7_4_1,Radial,type1
+cell_290,gene_0_0_0,Random,type1
+cell_290,gene_0_1_0,Random,type1
+cell_290,gene_0_2_0,Random,type1
+cell_290,gene_0_3_0,Random,type1
+cell_290,gene_0_4_0,Random,type1
+cell_290,gene_1_0_0,Foci,type1
+cell_290,gene_1_1_0,Foci,type1
+cell_290,gene_1_2_0,Foci,type1
+cell_290,gene_1_3_0,Foci,type1
+cell_290,gene_1_4_0,Foci,type1
+cell_290,gene_2_0_0,Nuclear,type1
+cell_290,gene_2_1_0,Nuclear,type1
+cell_290,gene_2_2_0,Nuclear,type1
+cell_290,gene_2_3_0,Nuclear,type1
+cell_290,gene_2_4_0,Nuclear,type1
+cell_290,gene_3_0_0,Cytoplasmic,type1
+cell_290,gene_3_1_0,Cytoplasmic,type1
+cell_290,gene_3_2_0,Cytoplasmic,type1
+cell_290,gene_3_3_0,Cytoplasmic,type1
+cell_290,gene_3_4_0,Cytoplasmic,type1
+cell_290,gene_4_0_0,Nuclear edge,type1
+cell_290,gene_4_1_0,Nuclear edge,type1
+cell_290,gene_4_2_0,Nuclear edge,type1
+cell_290,gene_4_3_0,Nuclear edge,type1
+cell_290,gene_4_4_0,Nuclear edge,type1
+cell_290,gene_5_0_0,Cell edge,type1
+cell_290,gene_5_1_0,Cell edge,type1
+cell_290,gene_5_2_0,Cell edge,type1
+cell_290,gene_5_3_0,Cell edge,type1
+cell_290,gene_5_4_0,Cell edge,type1
+cell_290,gene_6_0_0,Protrusion,type1
+cell_290,gene_6_1_0,Protrusion,type1
+cell_290,gene_6_2_0,Protrusion,type1
+cell_290,gene_6_3_0,Protrusion,type1
+cell_290,gene_6_4_0,Protrusion,type1
+cell_290,gene_7_0_0,Radial,type1
+cell_290,gene_7_1_0,Radial,type1
+cell_290,gene_7_2_0,Radial,type1
+cell_290,gene_7_3_0,Radial,type1
+cell_290,gene_7_4_0,Radial,type1
+cell_290,gene_0_0_1,Random,type1
+cell_290,gene_0_1_1,Random,type1
+cell_290,gene_0_2_1,Random,type1
+cell_290,gene_0_3_1,Random,type1
+cell_290,gene_0_4_1,Random,type1
+cell_290,gene_1_0_1,Foci,type1
+cell_290,gene_1_1_1,Foci,type1
+cell_290,gene_1_2_1,Foci,type1
+cell_290,gene_1_3_1,Foci,type1
+cell_290,gene_1_4_1,Foci,type1
+cell_290,gene_2_0_1,Nuclear,type1
+cell_290,gene_2_1_1,Nuclear,type1
+cell_290,gene_2_2_1,Nuclear,type1
+cell_290,gene_2_3_1,Nuclear,type1
+cell_290,gene_2_4_1,Nuclear,type1
+cell_290,gene_3_0_1,Cytoplasmic,type1
+cell_290,gene_3_1_1,Cytoplasmic,type1
+cell_290,gene_3_2_1,Cytoplasmic,type1
+cell_290,gene_3_3_1,Cytoplasmic,type1
+cell_290,gene_3_4_1,Cytoplasmic,type1
+cell_290,gene_4_0_1,Nuclear edge,type1
+cell_290,gene_4_1_1,Nuclear edge,type1
+cell_290,gene_4_2_1,Nuclear edge,type1
+cell_290,gene_4_3_1,Nuclear edge,type1
+cell_290,gene_4_4_1,Nuclear edge,type1
+cell_290,gene_5_0_1,Cell edge,type1
+cell_290,gene_5_1_1,Cell edge,type1
+cell_290,gene_5_2_1,Cell edge,type1
+cell_290,gene_5_3_1,Cell edge,type1
+cell_290,gene_5_4_1,Cell edge,type1
+cell_290,gene_6_0_1,Protrusion,type1
+cell_290,gene_6_1_1,Protrusion,type1
+cell_290,gene_6_2_1,Protrusion,type1
+cell_290,gene_6_3_1,Protrusion,type1
+cell_290,gene_6_4_1,Protrusion,type1
+cell_290,gene_7_0_1,Radial,type1
+cell_290,gene_7_1_1,Radial,type1
+cell_290,gene_7_2_1,Radial,type1
+cell_290,gene_7_3_1,Radial,type1
+cell_290,gene_7_4_1,Radial,type1
+cell_50,gene_0_0_0,Random,type1
+cell_50,gene_0_1_0,Random,type1
+cell_50,gene_0_2_0,Random,type1
+cell_50,gene_0_3_0,Random,type1
+cell_50,gene_0_4_0,Random,type1
+cell_50,gene_1_0_0,Foci,type1
+cell_50,gene_1_1_0,Foci,type1
+cell_50,gene_1_2_0,Foci,type1
+cell_50,gene_1_3_0,Foci,type1
+cell_50,gene_1_4_0,Foci,type1
+cell_50,gene_2_0_0,Nuclear,type1
+cell_50,gene_2_1_0,Nuclear,type1
+cell_50,gene_2_2_0,Nuclear,type1
+cell_50,gene_2_3_0,Nuclear,type1
+cell_50,gene_2_4_0,Nuclear,type1
+cell_50,gene_3_0_0,Cytoplasmic,type1
+cell_50,gene_3_1_0,Cytoplasmic,type1
+cell_50,gene_3_2_0,Cytoplasmic,type1
+cell_50,gene_3_3_0,Cytoplasmic,type1
+cell_50,gene_3_4_0,Cytoplasmic,type1
+cell_50,gene_4_0_0,Nuclear edge,type1
+cell_50,gene_4_1_0,Nuclear edge,type1
+cell_50,gene_4_2_0,Nuclear edge,type1
+cell_50,gene_4_3_0,Nuclear edge,type1
+cell_50,gene_4_4_0,Nuclear edge,type1
+cell_50,gene_5_0_0,Cell edge,type1
+cell_50,gene_5_1_0,Cell edge,type1
+cell_50,gene_5_2_0,Cell edge,type1
+cell_50,gene_5_3_0,Cell edge,type1
+cell_50,gene_5_4_0,Cell edge,type1
+cell_50,gene_6_0_0,Protrusion,type1
+cell_50,gene_6_1_0,Protrusion,type1
+cell_50,gene_6_2_0,Protrusion,type1
+cell_50,gene_6_3_0,Protrusion,type1
+cell_50,gene_6_4_0,Protrusion,type1
+cell_50,gene_7_0_0,Radial,type1
+cell_50,gene_7_1_0,Radial,type1
+cell_50,gene_7_2_0,Radial,type1
+cell_50,gene_7_3_0,Radial,type1
+cell_50,gene_7_4_0,Radial,type1
+cell_50,gene_0_0_1,Random,type1
+cell_50,gene_0_1_1,Random,type1
+cell_50,gene_0_2_1,Random,type1
+cell_50,gene_0_3_1,Random,type1
+cell_50,gene_0_4_1,Random,type1
+cell_50,gene_1_0_1,Foci,type1
+cell_50,gene_1_1_1,Foci,type1
+cell_50,gene_1_2_1,Foci,type1
+cell_50,gene_1_3_1,Foci,type1
+cell_50,gene_1_4_1,Foci,type1
+cell_50,gene_2_0_1,Nuclear,type1
+cell_50,gene_2_1_1,Nuclear,type1
+cell_50,gene_2_2_1,Nuclear,type1
+cell_50,gene_2_3_1,Nuclear,type1
+cell_50,gene_2_4_1,Nuclear,type1
+cell_50,gene_3_0_1,Cytoplasmic,type1
+cell_50,gene_3_1_1,Cytoplasmic,type1
+cell_50,gene_3_2_1,Cytoplasmic,type1
+cell_50,gene_3_3_1,Cytoplasmic,type1
+cell_50,gene_3_4_1,Cytoplasmic,type1
+cell_50,gene_4_0_1,Nuclear edge,type1
+cell_50,gene_4_1_1,Nuclear edge,type1
+cell_50,gene_4_2_1,Nuclear edge,type1
+cell_50,gene_4_3_1,Nuclear edge,type1
+cell_50,gene_4_4_1,Nuclear edge,type1
+cell_50,gene_5_0_1,Cell edge,type1
+cell_50,gene_5_1_1,Cell edge,type1
+cell_50,gene_5_2_1,Cell edge,type1
+cell_50,gene_5_3_1,Cell edge,type1
+cell_50,gene_5_4_1,Cell edge,type1
+cell_50,gene_6_0_1,Protrusion,type1
+cell_50,gene_6_1_1,Protrusion,type1
+cell_50,gene_6_2_1,Protrusion,type1
+cell_50,gene_6_3_1,Protrusion,type1
+cell_50,gene_6_4_1,Protrusion,type1
+cell_50,gene_7_0_1,Radial,type1
+cell_50,gene_7_1_1,Radial,type1
+cell_50,gene_7_2_1,Radial,type1
+cell_50,gene_7_3_1,Radial,type1
+cell_50,gene_7_4_1,Radial,type1
+cell_257,gene_0_0_0,Random,type1
+cell_257,gene_0_1_0,Random,type1
+cell_257,gene_0_2_0,Random,type1
+cell_257,gene_0_3_0,Random,type1
+cell_257,gene_0_4_0,Random,type1
+cell_257,gene_1_0_0,Foci,type1
+cell_257,gene_1_1_0,Foci,type1
+cell_257,gene_1_2_0,Foci,type1
+cell_257,gene_1_3_0,Foci,type1
+cell_257,gene_1_4_0,Foci,type1
+cell_257,gene_2_0_0,Nuclear,type1
+cell_257,gene_2_1_0,Nuclear,type1
+cell_257,gene_2_2_0,Nuclear,type1
+cell_257,gene_2_3_0,Nuclear,type1
+cell_257,gene_2_4_0,Nuclear,type1
+cell_257,gene_3_0_0,Cytoplasmic,type1
+cell_257,gene_3_1_0,Cytoplasmic,type1
+cell_257,gene_3_2_0,Cytoplasmic,type1
+cell_257,gene_3_3_0,Cytoplasmic,type1
+cell_257,gene_3_4_0,Cytoplasmic,type1
+cell_257,gene_4_0_0,Nuclear edge,type1
+cell_257,gene_4_1_0,Nuclear edge,type1
+cell_257,gene_4_2_0,Nuclear edge,type1
+cell_257,gene_4_3_0,Nuclear edge,type1
+cell_257,gene_4_4_0,Nuclear edge,type1
+cell_257,gene_5_0_0,Cell edge,type1
+cell_257,gene_5_1_0,Cell edge,type1
+cell_257,gene_5_2_0,Cell edge,type1
+cell_257,gene_5_3_0,Cell edge,type1
+cell_257,gene_5_4_0,Cell edge,type1
+cell_257,gene_6_0_0,Protrusion,type1
+cell_257,gene_6_1_0,Protrusion,type1
+cell_257,gene_6_2_0,Protrusion,type1
+cell_257,gene_6_3_0,Protrusion,type1
+cell_257,gene_6_4_0,Protrusion,type1
+cell_257,gene_7_0_0,Radial,type1
+cell_257,gene_7_1_0,Radial,type1
+cell_257,gene_7_2_0,Radial,type1
+cell_257,gene_7_3_0,Radial,type1
+cell_257,gene_7_4_0,Radial,type1
+cell_257,gene_0_0_1,Random,type1
+cell_257,gene_0_1_1,Random,type1
+cell_257,gene_0_2_1,Random,type1
+cell_257,gene_0_3_1,Random,type1
+cell_257,gene_0_4_1,Random,type1
+cell_257,gene_1_0_1,Foci,type1
+cell_257,gene_1_1_1,Foci,type1
+cell_257,gene_1_2_1,Foci,type1
+cell_257,gene_1_3_1,Foci,type1
+cell_257,gene_1_4_1,Foci,type1
+cell_257,gene_2_0_1,Nuclear,type1
+cell_257,gene_2_1_1,Nuclear,type1
+cell_257,gene_2_2_1,Nuclear,type1
+cell_257,gene_2_3_1,Nuclear,type1
+cell_257,gene_2_4_1,Nuclear,type1
+cell_257,gene_3_0_1,Cytoplasmic,type1
+cell_257,gene_3_1_1,Cytoplasmic,type1
+cell_257,gene_3_2_1,Cytoplasmic,type1
+cell_257,gene_3_3_1,Cytoplasmic,type1
+cell_257,gene_3_4_1,Cytoplasmic,type1
+cell_257,gene_4_0_1,Nuclear edge,type1
+cell_257,gene_4_1_1,Nuclear edge,type1
+cell_257,gene_4_2_1,Nuclear edge,type1
+cell_257,gene_4_3_1,Nuclear edge,type1
+cell_257,gene_4_4_1,Nuclear edge,type1
+cell_257,gene_5_0_1,Cell edge,type1
+cell_257,gene_5_1_1,Cell edge,type1
+cell_257,gene_5_2_1,Cell edge,type1
+cell_257,gene_5_3_1,Cell edge,type1
+cell_257,gene_5_4_1,Cell edge,type1
+cell_257,gene_6_0_1,Protrusion,type1
+cell_257,gene_6_1_1,Protrusion,type1
+cell_257,gene_6_2_1,Protrusion,type1
+cell_257,gene_6_3_1,Protrusion,type1
+cell_257,gene_6_4_1,Protrusion,type1
+cell_257,gene_7_0_1,Radial,type1
+cell_257,gene_7_1_1,Radial,type1
+cell_257,gene_7_2_1,Radial,type1
+cell_257,gene_7_3_1,Radial,type1
+cell_257,gene_7_4_1,Radial,type1
