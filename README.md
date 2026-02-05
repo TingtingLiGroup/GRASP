@@ -5,7 +5,7 @@
 
 This is the official PyTorch implementation of:
 
-"GRASP: Modeling Transcript Spot Graph Representations for Analyzing Subcellular Localization Patterns in High-Resolution Spatial Transcriptomics".
+"GRASP: Modeling Transcript Spot Graph Representations for Analyzing Subcellular Localization Patterns and Cell Clustering in High-Resolution Spatial Transcriptomics".
 
 Note: This codebase was uploaded along with the manuscript for peer review. The complete code will be released after acceptance.
 
