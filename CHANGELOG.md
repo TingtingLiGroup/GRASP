@@ -11,6 +11,12 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - `grasp-tool cellplot` CLI command for quick visualization.
 - Repo-only tiny demo helpers under `scripts/` and `demo_pkl/`.
 
+## [0.1.3] - 2026-03-10
+
+### Changed
+
+- Update paper title: "for Analyzing Subcellular Localization Patterns" -> "to Analyze Subcellular Patterns".
+
 ## [0.1.2] - 2026-02-05
 
 ### Changed
