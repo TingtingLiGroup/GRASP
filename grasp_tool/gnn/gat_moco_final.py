@@ -1,4 +1,9 @@
 import copy
+import queue
+import threading
+from contextlib import ExitStack, contextmanager, nullcontext
+from dataclasses import dataclass
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -14,6 +19,49 @@ import warnings
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
+
+
+class _PrefetchWorkerError:
+    def __init__(self, error):
+        self.error = error
+
+
+@dataclass(frozen=True)
+class ImmutableTrainingBatch:
+    """Minimal CPU batch cache that returns a new object on device transfer."""
+
+    x: torch.Tensor
+    edge_index: torch.Tensor
+    batch: torch.Tensor
+    num_graphs: int
+
+    @classmethod
+    def from_pyg_batch(cls, graph_batch):
+        return cls(
+            x=graph_batch.x,
+            edge_index=graph_batch.edge_index,
+            batch=graph_batch.batch,
+            num_graphs=graph_batch.num_graphs,
+        )
+
+    def to(self, device, non_blocking=False):
+        return ImmutableTrainingBatch(
+            x=self.x.to(device, non_blocking=non_blocking),
+            edge_index=self.edge_index.to(device, non_blocking=non_blocking),
+            batch=self.batch.to(device, non_blocking=non_blocking),
+            num_graphs=self.num_graphs,
+        )
+
+    def pin_memory(self):
+        return ImmutableTrainingBatch(
+            x=self.x.pin_memory(),
+            edge_index=self.edge_index.pin_memory(),
+            batch=self.batch.pin_memory(),
+            num_graphs=self.num_graphs,
+        )
+
+    def nbytes(self):
+        return sum(tensor.numel() * tensor.element_size() for tensor in (self.x, self.edge_index, self.batch))
 
 
 # --- GATEncoder and ProjectionHead (from original.py) ---
@@ -32,19 +80,13 @@ class ProjectionHead(nn.Module):
 
 
 class GATEncoder(nn.Module):  # From original.py
-    def __init__(
-        self, in_channels, hidden_channels, out_channels, heads=1, dropout=0.1
-    ):
+    def __init__(self, in_channels, hidden_channels, out_channels, heads=1, dropout=0.1):
         super().__init__()
         self.conv1 = GATConv(in_channels, hidden_channels, heads=heads, dropout=dropout)
         self.bn1 = nn.BatchNorm1d(hidden_channels * heads)
         self.dropout1 = nn.Dropout(dropout)
-        self.conv2 = GATConv(
-            hidden_channels * heads, out_channels, heads=heads, dropout=dropout
-        )
-        self.expected_output_dim = (
-            out_channels  # For compatibility with checked.py logic if needed elsewhere
-        )
+        self.conv2 = GATConv(hidden_channels * heads, out_channels, heads=heads, dropout=dropout)
+        self.expected_output_dim = out_channels  # For compatibility with checked.py logic if needed elsewhere
 
     def forward(self, x, edge_index, batch):
         x = self.conv1(x, edge_index)
@@ -87,6 +129,10 @@ class MoCo(nn.Module):
         self.K = K
         self.m = m
         self.T = T
+        self.fuse_positive_encoders = False
+        self.reconstruction_negative_ratio = 0
+        self.reconstruction_sampling_seed = 2025
+        self._reconstruction_generators = {}
 
         self.encoder_q = base_encoder
         self.encoder_k = copy.deepcopy(base_encoder)
@@ -95,9 +141,7 @@ class MoCo(nn.Module):
         # GATEncoder outputs out_channels, used as ProjectionHead input.
         # If expected_output_dim=128 then in_channels=128.
         # dim is the projection output dimension.
-        projector_in_channels = getattr(
-            base_encoder, "expected_output_dim", 128
-        )  # Default to 128 if not found
+        projector_in_channels = getattr(base_encoder, "expected_output_dim", 128)  # Default to 128 if not found
 
         self.projector_q = ProjectionHead(
             in_channels=projector_in_channels,
@@ -106,64 +150,154 @@ class MoCo(nn.Module):
         )
         self.projector_k = copy.deepcopy(self.projector_q)
 
-        for param_q, param_k in zip(
-            self.encoder_q.parameters(), self.encoder_k.parameters()
-        ):
+        for param_q, param_k in zip(self.encoder_q.parameters(), self.encoder_k.parameters()):
             param_k.data.copy_(param_q.data)
             param_k.requires_grad = False
-        for param_q, param_k in zip(
-            self.projector_q.parameters(), self.projector_k.parameters()
-        ):
+        for param_q, param_k in zip(self.projector_q.parameters(), self.projector_k.parameters()):
             param_k.data.copy_(param_q.data)
             param_k.requires_grad = False
 
         self.register_buffer("queue", torch.randn(K, dim))
-        self.queue = F.normalize(
-            self.queue, dim=1
-        )  # Row-wise normalization (dim=1), matching fixed.py
+        self.queue = F.normalize(self.queue, dim=1)  # Row-wise normalization (dim=1), matching fixed.py
         self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
+
+    @contextmanager
+    def _training_stage_scope(self, name):
+        profile_training = getattr(self, "profile_training", False)
+        stage_recorder = getattr(self, "training_stage_recorder", None)
+        if not profile_training and stage_recorder is None:
+            with nullcontext():
+                yield
+            return
+
+        with ExitStack() as stack:
+            if profile_training:
+                stack.enter_context(torch.profiler.record_function(name))
+            if stage_recorder is not None:
+                stack.enter_context(stage_recorder(name))
+            yield
 
     # --- Loss functions (from fixed.py) ---
     def _compute_reconstruction_loss(self, node_embeddings, edge_index, num_nodes):
         if hasattr(self, "weighted_recon_loss") and self.weighted_recon_loss:
-            return self._compute_weighted_reconstruction_loss(
-                node_embeddings, edge_index, num_nodes
-            )
+            return self._compute_weighted_reconstruction_loss(node_embeddings, edge_index, num_nodes)
         else:
-            return self._compute_basic_reconstruction_loss(
-                node_embeddings, edge_index, num_nodes
-            )
+            return self._compute_basic_reconstruction_loss(node_embeddings, edge_index, num_nodes)
 
-    def _compute_basic_reconstruction_loss(
-        self, node_embeddings, edge_index, num_nodes
-    ):
+    def _compute_basic_reconstruction_loss(self, node_embeddings, edge_index, num_nodes):
+        negative_ratio = getattr(self, "reconstruction_negative_ratio", 0)
+        if negative_ratio > 0:
+            return self._compute_sampled_reconstruction_loss(
+                node_embeddings,
+                edge_index,
+                num_nodes,
+                negative_ratio,
+            )
+        return self._compute_dense_basic_reconstruction_loss(node_embeddings, edge_index, num_nodes)
+
+    def _compute_dense_basic_reconstruction_loss(self, node_embeddings, edge_index, num_nodes):
         # NOTE: this variant uses raw node embeddings (no normalization).
-        reconstructed_adj = torch.sigmoid(
-            torch.mm(node_embeddings, node_embeddings.t())
-        )
-        original_dense_adj = torch.zeros(
-            (num_nodes, num_nodes), device=node_embeddings.device
-        )
+        reconstructed_adj = torch.sigmoid(torch.mm(node_embeddings, node_embeddings.t()))
+        original_dense_adj = torch.zeros((num_nodes, num_nodes), device=node_embeddings.device)
         original_dense_adj[edge_index[0], edge_index[1]] = 1
         return F.binary_cross_entropy(reconstructed_adj, original_dense_adj)
 
-    def _compute_weighted_reconstruction_loss(
-        self, node_embeddings, edge_index, num_nodes
+    def _reconstruction_generator(self, device):
+        device_key = str(device)
+        generator = self._reconstruction_generators.get(device_key)
+        if generator is None:
+            generator = torch.Generator(device=device)
+            generator.manual_seed(self.reconstruction_sampling_seed)
+            self._reconstruction_generators[device_key] = generator
+        return generator
+
+    def _sample_negative_flat_indices(
+        self,
+        positive_flat_indices,
+        total_pairs,
+        sample_count,
+        device,
     ):
+        generator = self._reconstruction_generator(device)
+        sampled_parts = []
+        remaining = sample_count
+        positive_count = positive_flat_indices.numel()
+        while remaining > 0:
+            candidate_count = max(remaining + 32, int(remaining * 1.01))
+            candidates = torch.randint(
+                total_pairs,
+                (candidate_count,),
+                device=device,
+                generator=generator,
+            )
+            if positive_count:
+                insertion_indices = torch.searchsorted(positive_flat_indices, candidates)
+                bounded_indices = insertion_indices.clamp(max=positive_count - 1)
+                is_positive = (insertion_indices < positive_count) & (
+                    positive_flat_indices[bounded_indices] == candidates
+                )
+                candidates = candidates[~is_positive]
+            selected = candidates[:remaining]
+            sampled_parts.append(selected)
+            remaining -= selected.numel()
+        return torch.cat(sampled_parts)
+
+    def _compute_sampled_reconstruction_loss(
+        self,
+        node_embeddings,
+        edge_index,
+        num_nodes,
+        negative_ratio,
+    ):
+        """Estimate the original dense BCE using all positives and sampled negatives."""
+        total_pairs = num_nodes * num_nodes
+        positive_flat_indices = torch.unique(edge_index[0] * num_nodes + edge_index[1])
+        positive_count = positive_flat_indices.numel()
+        negative_count = total_pairs - positive_count
+
+        if positive_count:
+            positive_sources = torch.div(positive_flat_indices, num_nodes, rounding_mode="floor")
+            positive_targets = positive_flat_indices.remainder(num_nodes)
+            positive_logits = (node_embeddings[positive_sources] * node_embeddings[positive_targets]).sum(dim=1)
+            positive_loss = F.binary_cross_entropy(
+                torch.sigmoid(positive_logits),
+                torch.ones_like(positive_logits),
+                reduction="sum",
+            )
+        else:
+            positive_loss = node_embeddings.sum() * 0.0
+
+        if negative_count <= 0:
+            return positive_loss / total_pairs
+
+        sample_count = max(1, negative_ratio * max(positive_count, 1))
+        negative_flat_indices = self._sample_negative_flat_indices(
+            positive_flat_indices,
+            total_pairs,
+            sample_count,
+            node_embeddings.device,
+        )
+        negative_sources = torch.div(negative_flat_indices, num_nodes, rounding_mode="floor")
+        negative_targets = negative_flat_indices.remainder(num_nodes)
+        negative_logits = (node_embeddings[negative_sources] * node_embeddings[negative_targets]).sum(dim=1)
+        mean_negative_loss = F.binary_cross_entropy(
+            torch.sigmoid(negative_logits),
+            torch.zeros_like(negative_logits),
+            reduction="mean",
+        )
+        return (positive_loss + negative_count * mean_negative_loss) / total_pairs
+
+    def _compute_weighted_reconstruction_loss(self, node_embeddings, edge_index, num_nodes):
         """Weighted reconstruction loss to mitigate class imbalance."""
 
         # L2-normalize node embeddings
         node_embeddings_normalized = F.normalize(node_embeddings, p=2, dim=1)
 
         # Pairwise similarity (logits)
-        sim_scores = torch.mm(
-            node_embeddings_normalized, node_embeddings_normalized.t()
-        )
+        sim_scores = torch.mm(node_embeddings_normalized, node_embeddings_normalized.t())
 
         # Build dense adjacency labels
-        original_dense_adj = torch.zeros(
-            (num_nodes, num_nodes), device=node_embeddings.device
-        )
+        original_dense_adj = torch.zeros((num_nodes, num_nodes), device=node_embeddings.device)
         original_dense_adj[edge_index[0], edge_index[1]] = 1
 
         # Compute a capped positive weight (log-scaled)
@@ -200,36 +334,26 @@ class MoCo(nn.Module):
                     graph_level_input, embeddings, k=k_neighbors, sigma=sigma
                 )
             elif input_features is not None:
-                print(
-                    "WARNING: batch is None; pooling input_features by mean as a fallback"
-                )
+                print("WARNING: batch is None; pooling input_features by mean as a fallback")
                 graph_level_input = input_features.mean(dim=0, keepdim=True)
                 return self._compute_spectral_clustering_loss(
                     graph_level_input, embeddings, k=k_neighbors, sigma=sigma
                 )
             else:
-                print(
-                    "WARNING: input_features not provided; using embeddings as a proxy for clustering loss"
-                )
-                return self._compute_spectral_clustering_loss(
-                    embeddings, embeddings, k=k_neighbors, sigma=sigma
-                )
+                print("WARNING: input_features not provided; using embeddings as a proxy for clustering loss")
+                return self._compute_spectral_clustering_loss(embeddings, embeddings, k=k_neighbors, sigma=sigma)
 
         batch_size = embeddings.size(0)
         if batch_size < num_clusters:
             print(
                 f"WARNING: batch_size ({batch_size}) < num_clusters ({num_clusters}); using simplified clustering loss"
             )
-            return self._compute_simple_clustering_loss(
-                embeddings, min(num_clusters, batch_size)
-            )
+            return self._compute_simple_clustering_loss(embeddings, min(num_clusters, batch_size))
 
         try:
             embeddings_np = embeddings.detach().cpu().numpy()
             # KMeans clustering (default n_init).
-            kmeans = KMeans(n_clusters=num_clusters, random_state=0, max_iter=100).fit(
-                embeddings_np
-            )
+            kmeans = KMeans(n_clusters=num_clusters, random_state=0, max_iter=100).fit(embeddings_np)
             pseudo_labels = kmeans.labels_
 
             pseudo_label_dist = torch.zeros(num_clusters, device=embeddings.device)
@@ -252,35 +376,23 @@ class MoCo(nn.Module):
                     loc=embedding_mean_np.mean(),
                     scale=scale.item(),
                 )
-                ideal_t_dist_tensor = torch.tensor(
-                    ideal_t_dist_pdf, dtype=torch.float, device=embeddings.device
-                )
+                ideal_t_dist_tensor = torch.tensor(ideal_t_dist_pdf, dtype=torch.float, device=embeddings.device)
 
                 min_val = ideal_t_dist_tensor.min().item()  # Python scalar.
                 max_val = ideal_t_dist_tensor.max().item()  # Python scalar.
                 if max_val == min_val:  # Handle constant values.
                     max_val = min_val + eps
 
-                ideal_t_dist_tensor = torch.histc(
-                    ideal_t_dist_tensor, bins=num_clusters, min=min_val, max=max_val
-                )
+                ideal_t_dist_tensor = torch.histc(ideal_t_dist_tensor, bins=num_clusters, min=min_val, max=max_val)
                 ideal_t_dist_tensor = ideal_t_dist_tensor + eps
                 ideal_t_dist_tensor /= ideal_t_dist_tensor.sum()
-                return F.kl_div(
-                    pseudo_label_dist.log(), ideal_t_dist_tensor, reduction="batchmean"
-                )
+                return F.kl_div(pseudo_label_dist.log(), ideal_t_dist_tensor, reduction="batchmean")
             else:  # 'uniform'
-                ideal_dist = (
-                    torch.ones(num_clusters, device=embeddings.device) / num_clusters
-                )
-                return F.kl_div(
-                    pseudo_label_dist.log(), ideal_dist, reduction="batchmean"
-                )
+                ideal_dist = torch.ones(num_clusters, device=embeddings.device) / num_clusters
+                return F.kl_div(pseudo_label_dist.log(), ideal_dist, reduction="batchmean")
 
         except Exception as e:
-            print(
-                f"ERROR: KMeans clustering failed: {e}; using simplified clustering loss"
-            )
+            print(f"ERROR: KMeans clustering failed: {e}; using simplified clustering loss")
             return self._compute_simple_clustering_loss(embeddings, num_clusters)
 
     def _compute_simple_clustering_loss(self, embeddings, num_clusters):
@@ -297,9 +409,7 @@ class MoCo(nn.Module):
         clustering_loss = similarity_matrix.abs().mean()
         return clustering_loss
 
-    def _compute_spectral_clustering_loss(
-        self, input_features, output_embeddings, k=100, sigma=1.0
-    ):
+    def _compute_spectral_clustering_loss(self, input_features, output_embeddings, k=100, sigma=1.0):
         batch_size = output_embeddings.size(0)
         if batch_size <= 1:
             return torch.tensor(0.0, device=output_embeddings.device)
@@ -315,20 +425,14 @@ class MoCo(nn.Module):
             _, topk_indices = torch.topk(similarity, k=min(k, batch_size - 1), dim=1)
             adjacency = torch.zeros_like(similarity)
             batch_indices_arange = (
-                torch.arange(batch_size, device=output_embeddings.device)
-                .unsqueeze(1)
-                .expand(-1, topk_indices.size(1))
+                torch.arange(batch_size, device=output_embeddings.device).unsqueeze(1).expand(-1, topk_indices.size(1))
             )
-            adjacency[batch_indices_arange, topk_indices] = similarity[
-                batch_indices_arange, topk_indices
-            ]
+            adjacency[batch_indices_arange, topk_indices] = similarity[batch_indices_arange, topk_indices]
             adjacency = 0.5 * (adjacency + adjacency.t())
         else:
             adjacency = similarity
 
-        output_squared_dist = (
-            torch.cdist(output_embeddings, output_embeddings, p=2) ** 2
-        )
+        output_squared_dist = torch.cdist(output_embeddings, output_embeddings, p=2) ** 2
         loss = torch.sum(adjacency * output_squared_dist)
 
         edge_weights_sum = torch.sum(adjacency)
@@ -339,13 +443,21 @@ class MoCo(nn.Module):
 
     @torch.no_grad()
     def _momentum_update_key_encoder(self):
-        for param_q, param_k in zip(
-            self.encoder_q.parameters(), self.encoder_k.parameters()
-        ):
+        if getattr(self, "foreach_momentum", False):
+            for query_module, key_module in (
+                (self.encoder_q, self.encoder_k),
+                (self.projector_q, self.projector_k),
+            ):
+                query_parameters = list(query_module.parameters())
+                key_parameters = list(key_module.parameters())
+                scaled_query_parameters = torch._foreach_mul(query_parameters, 1.0 - self.m)
+                torch._foreach_mul_(key_parameters, self.m)
+                torch._foreach_add_(key_parameters, scaled_query_parameters)
+            return
+
+        for param_q, param_k in zip(self.encoder_q.parameters(), self.encoder_k.parameters()):
             param_k.data = param_k.data * self.m + param_q.data * (1.0 - self.m)
-        for param_q, param_k in zip(
-            self.projector_q.parameters(), self.projector_k.parameters()
-        ):
+        for param_q, param_k in zip(self.projector_q.parameters(), self.projector_k.parameters()):
             param_k.data = param_k.data * self.m + param_q.data * (1.0 - self.m)
 
     @torch.no_grad()
@@ -406,45 +518,70 @@ class MoCoMultiPositive(MoCo):
             adjusted_reconstruction, adjusted_contrastive, adjusted_clustering)
         """
         # 1. Query features
-        q_node_embeddings, q = self.encoder_q(im_q, edge_index_q, batch)
-        q = self.projector_q(q)
-        q = F.normalize(q, dim=1)
+        with self._training_stage_scope("moco_query_encoder"):
+            q_node_embeddings, q = self.encoder_q(im_q, edge_index_q, batch)
+            q = self.projector_q(q)
+            q = F.normalize(q, dim=1)
 
         # 2. Positive key features
         k_features = []
         with torch.no_grad():
             self._momentum_update_key_encoder()
-            for im_k, edge_index_k in zip(im_k_list, edge_index_k_list):
-                _, k = self.encoder_k(im_k, edge_index_k, batch)
-                k = self.projector_k(k)
-                k = F.normalize(k, dim=1)
-                k_features.append(k)
+            if getattr(self, "fuse_positive_encoders", False) and len(im_k_list) > 1:
+                with self._training_stage_scope("moco_key_encoder"):
+                    node_offset = 0
+                    combined_edge_indices = []
+                    for im_k, edge_index_k in zip(im_k_list, edge_index_k_list):
+                        combined_edge_indices.append(edge_index_k + node_offset)
+                        node_offset += im_k.size(0)
+                    graph_count = q.size(0)
+                    combined_im_k = torch.cat(im_k_list, dim=0)
+                    combined_edge_index_k = torch.cat(combined_edge_indices, dim=1)
+                    combined_batch = torch.cat(
+                        [batch + positive_index * graph_count for positive_index in range(len(im_k_list))],
+                        dim=0,
+                    )
+                    _, combined_k = self.encoder_k(
+                        combined_im_k,
+                        combined_edge_index_k,
+                        combined_batch,
+                    )
+                    combined_k = self.projector_k(combined_k)
+                    combined_k = F.normalize(combined_k, dim=1)
+                k_features.extend(combined_k.split(graph_count, dim=0))
+            else:
+                for im_k, edge_index_k in zip(im_k_list, edge_index_k_list):
+                    with self._training_stage_scope("moco_key_encoder"):
+                        _, k = self.encoder_k(im_k, edge_index_k, batch)
+                        k = self.projector_k(k)
+                        k = F.normalize(k, dim=1)
+                    k_features.append(k)
 
         # 3. Similarities to all positive samples
-        l_pos_list = []
-        for k in k_features:
-            pos_sim = torch.einsum("nc,nc->n", [q, k]).unsqueeze(-1)
-            l_pos_list.append(pos_sim)
+        with self._training_stage_scope("moco_contrastive"):
+            l_pos_list = []
+            for k in k_features:
+                pos_sim = torch.einsum("nc,nc->n", [q, k]).unsqueeze(-1)
+                l_pos_list.append(pos_sim)
 
-        # l_pos: [batch_size, num_positives]
-        # l_neg: [batch_size, K]  # K is queue size
-        l_pos = torch.cat(l_pos_list, dim=1)  # shape: (batch_size, num_positives)
-        l_neg = torch.einsum("nc,kc->nk", [q, self.queue.clone().detach()])
+            # l_pos: [batch_size, num_positives]
+            # l_neg: [batch_size, K]  # K is queue size
+            l_pos = torch.cat(l_pos_list, dim=1)  # shape: (batch_size, num_positives)
+            l_neg = torch.einsum("nc,kc->nk", [q, self.queue.clone().detach()])
 
-        # 4. Contrastive loss
-        pos_exp = torch.exp(l_pos / self.T)  # [batch_size, num_positives]
-        neg_exp = torch.exp(l_neg / self.T)
-        # Numerator: sum over positives
-        numerator = pos_exp.sum(dim=1)  # [batch_size]
-        # Denominator: sum over positives + sum over negatives
-        denominator = numerator + neg_exp.sum(dim=1)  # [batch_size]
-        # loss = -log(sum(exp(pos))/sum(exp(all)))
-        contrastive_loss = -torch.log(numerator / denominator).mean()
+            # 4. Contrastive loss
+            pos_exp = torch.exp(l_pos / self.T)  # [batch_size, num_positives]
+            neg_exp = torch.exp(l_neg / self.T)
+            # Numerator: sum over positives
+            numerator = pos_exp.sum(dim=1)  # [batch_size]
+            # Denominator: sum over positives + sum over negatives
+            denominator = numerator + neg_exp.sum(dim=1)  # [batch_size]
+            # loss = -log(sum(exp(pos))/sum(exp(all)))
+            contrastive_loss = -torch.log(numerator / denominator).mean()
 
         # 5. Reconstruction loss
-        reconstruction_loss = self._compute_reconstruction_loss(
-            q_node_embeddings, edge_index_q, im_q.size(0)
-        )
+        with self._training_stage_scope("moco_reconstruction"):
+            reconstruction_loss = self._compute_reconstruction_loss(q_node_embeddings, edge_index_q, im_q.size(0))
 
         # 6. Clustering loss (optional)
         if use_clustering:
@@ -454,22 +591,16 @@ class MoCoMultiPositive(MoCo):
                     q, num_clusters, dist_type, input_features=im_q, batch=batch
                 )
             else:
-                clustering_loss = self._compute_clustering_loss(
-                    q, num_clusters, dist_type
-                )
+                clustering_loss = self._compute_clustering_loss(q, num_clusters, dist_type)
         else:
             clustering_loss = torch.tensor(0.0, device=contrastive_loss.device)
 
         # 7. Loss alignment
         eps = 1e-6
-        adjusted_contrastive = contrastive_loss / (
-            (contrastive_loss / (reconstruction_loss + eps)).detach() + eps
-        )
+        adjusted_contrastive = contrastive_loss / ((contrastive_loss / (reconstruction_loss + eps)).detach() + eps)
 
         if use_clustering:
-            adjusted_clustering = clustering_loss / (
-                (clustering_loss / (reconstruction_loss + eps)).detach() + eps
-            )
+            adjusted_clustering = clustering_loss / ((clustering_loss / (reconstruction_loss + eps)).detach() + eps)
         else:
             adjusted_clustering = torch.tensor(0.0, device=contrastive_loss.device)
 
@@ -477,18 +608,15 @@ class MoCoMultiPositive(MoCo):
 
         # 8. Total loss
         if use_clustering:
-            total_loss = (
-                a * adjusted_reconstruction
-                + b * adjusted_contrastive
-                + c * adjusted_clustering
-            )
+            total_loss = a * adjusted_reconstruction + b * adjusted_contrastive + c * adjusted_clustering
         else:
             # Only reconstruction + contrastive
             total_loss = a * adjusted_reconstruction + b * adjusted_contrastive
 
         # 9. Update queue (use the last positive)
         if k_features:  # Ensure k_features is not empty.
-            self._dequeue_and_enqueue(k_features[-1])
+            with self._training_stage_scope("moco_queue_update"):
+                self._dequeue_and_enqueue(k_features[-1])
 
         # 10. Return losses
         return (
@@ -532,47 +660,31 @@ class MoCoMultiPositive(MoCo):
         if q.size(0) > 0 and k_features:
             k_stacked = torch.stack(k_features).permute(1, 0, 2)  # [B, P, D]
             q_expanded = q.unsqueeze(1)  # [B, 1, D]
-            pos_sims = (
-                torch.bmm(q_expanded, k_stacked.transpose(1, 2)).squeeze(1) / self.T
-            )  # [B, P]
+            pos_sims = torch.bmm(q_expanded, k_stacked.transpose(1, 2)).squeeze(1) / self.T  # [B, P]
             neg_sims = torch.matmul(q, self.queue.clone().detach().T) / self.T  # [B, K]
             logits_all = torch.cat([pos_sims, neg_sims], dim=1)
             logsum = torch.logsumexp(logits_all, dim=1, keepdim=True)
             log_probs = pos_sims - logsum
             contrastive_loss = -log_probs.mean()
 
-        reconstruction_loss = self._compute_reconstruction_loss(
-            q_node_embeddings, edge_index_q, im_q.size(0)
-        )
+        reconstruction_loss = self._compute_reconstruction_loss(q_node_embeddings, edge_index_q, im_q.size(0))
 
         if use_clustering:
             clustering_loss = self._compute_clustering_loss(
                 q, num_clusters, dist_type, input_features=im_q, batch=batch
             )
         else:
-            clustering_loss = torch.tensor(
-                0.0, device=q.device if q.numel() > 0 else torch.device("cpu")
-            )
+            clustering_loss = torch.tensor(0.0, device=q.device if q.numel() > 0 else torch.device("cpu"))
 
         eps = 1e-6
-        adjusted_contrastive = contrastive_loss / (
-            (contrastive_loss / (reconstruction_loss + eps)).detach() + eps
-        )
+        adjusted_contrastive = contrastive_loss / ((contrastive_loss / (reconstruction_loss + eps)).detach() + eps)
         adjusted_reconstruction = reconstruction_loss
 
         if use_clustering:
-            adjusted_clustering = clustering_loss / (
-                (clustering_loss / (reconstruction_loss + eps)).detach() + eps
-            )
-            total_loss = (
-                a * adjusted_reconstruction
-                + b * adjusted_contrastive
-                + c * adjusted_clustering
-            )
+            adjusted_clustering = clustering_loss / ((clustering_loss / (reconstruction_loss + eps)).detach() + eps)
+            total_loss = a * adjusted_reconstruction + b * adjusted_contrastive + c * adjusted_clustering
         else:
-            adjusted_clustering = torch.tensor(
-                0.0, device=q.device if q.numel() > 0 else torch.device("cpu")
-            )
+            adjusted_clustering = torch.tensor(0.0, device=q.device if q.numel() > 0 else torch.device("cpu"))
             total_loss = a * adjusted_reconstruction + b * adjusted_contrastive
 
         if k_features:
@@ -624,9 +736,7 @@ class MoCoMultiPositive(MoCo):
             k_avg_for_loss = torch.mean(torch.stack(k_features), dim=0)  # [B,D]
             k_avg_for_loss = F.normalize(k_avg_for_loss, dim=1)
 
-            pos_sims_avg = (
-                torch.einsum("nc,nc->n", q, k_avg_for_loss).unsqueeze(-1) / self.T
-            )  # [B,1]
+            pos_sims_avg = torch.einsum("nc,nc->n", q, k_avg_for_loss).unsqueeze(-1) / self.T  # [B,1]
             neg_sims = torch.matmul(q, self.queue.clone().detach().T) / self.T  # [B, K]
 
             logits_all = torch.cat([pos_sims_avg, neg_sims], dim=1)  # [B, 1+K]
@@ -634,38 +744,24 @@ class MoCoMultiPositive(MoCo):
             log_probs = pos_sims_avg - logsum  # [B,1]
             contrastive_loss = -log_probs.mean()
 
-        reconstruction_loss = self._compute_reconstruction_loss(
-            q_node_embeddings, edge_index_q, im_q.size(0)
-        )
+        reconstruction_loss = self._compute_reconstruction_loss(q_node_embeddings, edge_index_q, im_q.size(0))
 
         if use_clustering:
             clustering_loss = self._compute_clustering_loss(
                 q, num_clusters, dist_type, input_features=im_q, batch=batch
             )
         else:
-            clustering_loss = torch.tensor(
-                0.0, device=q.device if q.numel() > 0 else torch.device("cpu")
-            )
+            clustering_loss = torch.tensor(0.0, device=q.device if q.numel() > 0 else torch.device("cpu"))
 
         eps = 1e-6
-        adjusted_contrastive = contrastive_loss / (
-            (contrastive_loss / (reconstruction_loss + eps)).detach() + eps
-        )
+        adjusted_contrastive = contrastive_loss / ((contrastive_loss / (reconstruction_loss + eps)).detach() + eps)
         adjusted_reconstruction = reconstruction_loss
 
         if use_clustering:
-            adjusted_clustering = clustering_loss / (
-                (clustering_loss / (reconstruction_loss + eps)).detach() + eps
-            )
-            total_loss = (
-                a * adjusted_reconstruction
-                + b * adjusted_contrastive
-                + c * adjusted_clustering
-            )
+            adjusted_clustering = clustering_loss / ((clustering_loss / (reconstruction_loss + eps)).detach() + eps)
+            total_loss = a * adjusted_reconstruction + b * adjusted_contrastive + c * adjusted_clustering
         else:
-            adjusted_clustering = torch.tensor(
-                0.0, device=q.device if q.numel() > 0 else torch.device("cpu")
-            )
+            adjusted_clustering = torch.tensor(0.0, device=q.device if q.numel() > 0 else torch.device("cpu"))
             total_loss = a * adjusted_reconstruction + b * adjusted_contrastive
 
         if k_avg_for_loss is not None:  # Use the precomputed k_avg_for_loss.
@@ -725,14 +821,11 @@ class MoCoMultiPositive(MoCo):
 
             # Filter GW distances for the current (cell, gene).
             filtered_distances = gw_distances_df[
-                (gw_distances_df["target_cell"] == target_cell)
-                & (gw_distances_df["target_gene"] == target_gene)
+                (gw_distances_df["target_cell"] == target_cell) & (gw_distances_df["target_gene"] == target_gene)
             ]
 
             # Take the closest (num_positive - 1) samples.
-            closest_samples = filtered_distances.nsmallest(
-                num_positive - 1, "gw_distance"
-            )
+            closest_samples = filtered_distances.nsmallest(num_positive - 1, "gw_distance")
 
             for _, row in closest_samples.iterrows():
                 other_cell = row["cell"]
@@ -740,9 +833,7 @@ class MoCoMultiPositive(MoCo):
 
                 # Find the matching graph index.
                 for j in range(len(original_graphs)):
-                    if (cell_labels[j] == other_cell) and (
-                        gene_labels[j] == other_gene
-                    ):
+                    if (cell_labels[j] == other_cell) and (gene_labels[j] == other_gene):
                         current_positives.append(j)
                         break
 
@@ -779,9 +870,7 @@ class MoCoMultiPositive(MoCo):
 
             # Number of nodes for this graph.
             node_count = (
-                graph.num_real_nodes
-                if hasattr(graph, "num_real_nodes")
-                else sum(1 for _ in graph.x if _[2] == 0)
+                graph.num_real_nodes if hasattr(graph, "num_real_nodes") else sum(1 for _ in graph.x if _[2] == 0)
             )
             node_counts[i] = node_count
 
@@ -809,20 +898,14 @@ class MoCoMultiPositive(MoCo):
             # Candidates within the node-count window.
             candidates = []
             for idx in same_gene_indices:
-                if (
-                    idx != i
-                    and abs(node_counts[idx] - target_node_count) <= window_size
-                ):
+                if idx != i and abs(node_counts[idx] - target_node_count) <= window_size:
                     candidates.append(idx)
 
             # If too few candidates, expand the window.
             if len(candidates) < num_positive - 1 and window_size < 20:
                 extended_candidates = []
                 for idx in same_gene_indices:
-                    if (
-                        idx != i
-                        and abs(node_counts[idx] - target_node_count) <= window_size * 2
-                    ):
+                    if idx != i and abs(node_counts[idx] - target_node_count) <= window_size * 2:
                         extended_candidates.append(idx)
                 candidates = extended_candidates
 
@@ -854,9 +937,7 @@ class MoCoMultiPositive(MoCo):
 
         # Validate js_distances_df format
         required_columns = ["target_cell", "target_gene", "cell", "gene", "js_distance"]
-        missing_columns = [
-            col for col in required_columns if col not in js_distances_df.columns
-        ]
+        missing_columns = [col for col in required_columns if col not in js_distances_df.columns]
 
         if missing_columns:
             raise ValueError(
@@ -864,127 +945,277 @@ class MoCoMultiPositive(MoCo):
                 f"Expected columns: {required_columns}"
             )
 
-        positive_samples = []
+        graph_index_by_pair = {}
+        for index, pair in enumerate(zip(cell_labels, gene_labels)):
+            graph_index_by_pair.setdefault(pair, index)
 
-        # Build positives for each graph.
-        for i in range(len(original_graphs)):
-            current_positives = []
-
-            # 1) Always include the augmented positive
-            current_positives.append(i)  # augmented_graphs[i] index
-
-            # 2) Add positives by JS distance
-            target_cell = cell_labels[i]
-            target_gene = gene_labels[i]
-
-            # Filter JS distances for the current (cell, gene).
-            filtered_distances = js_distances_df[
-                (js_distances_df["target_cell"] == target_cell)
-                & (js_distances_df["target_gene"] == target_gene)
-            ]
-
-            # Take the closest (num_positive - 1) samples.
-            closest_samples = filtered_distances.nsmallest(
-                num_positive - 1, "js_distance"
+        positive_indices_by_target = {}
+        additional_positive_count = max(0, num_positive - 1)
+        if additional_positive_count:
+            target_columns = ["target_cell", "target_gene"]
+            sorted_distances = js_distances_df.sort_values("js_distance", kind="stable", na_position="last")
+            closest_distances = sorted_distances.groupby(target_columns, sort=False, observed=True).head(
+                additional_positive_count
             )
+            for row in closest_distances.itertuples(index=False):
+                target = (row.target_cell, row.target_gene)
+                positive_index = graph_index_by_pair.get((row.cell, row.gene))
+                if positive_index is not None:
+                    positive_indices_by_target.setdefault(target, []).append(positive_index)
 
-            for _, row in closest_samples.iterrows():
-                other_cell = row["cell"]
-                other_gene = row["gene"]
+        positive_samples = []
+        for index in range(len(original_graphs)):
+            current_positives = [index]
+            target = (cell_labels[index], gene_labels[index])
+            current_positives.extend(positive_indices_by_target.get(target, ()))
 
-                # Find the matching graph index.
-                for j in range(len(original_graphs)):
-                    if (cell_labels[j] == other_cell) and (
-                        gene_labels[j] == other_gene
-                    ):
-                        current_positives.append(j)
-                        break
-
-            # Ensure enough positives; fall back to the query index.
             while len(current_positives) < num_positive:
-                current_positives.append(i)
+                current_positives.append(index)
 
-            positive_samples.append((i, current_positives))
+            positive_samples.append((index, current_positives))
 
         return positive_samples  # [(query_idx, [pos_idx1, pos_idx2, ...]), ...]
 
     @staticmethod
-    def prepare_multi_positive_batch(
-        original_graphs, augmented_graphs, positive_samples, batch_size
+    def iter_training_batch_ranges(total_samples, batch_size):
+        """Yield existing batch boundaries, including the one-item tail rule."""
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+
+        full_batches, remainder = divmod(total_samples, batch_size)
+        for batch_index in range(full_batches):
+            start_index = batch_index * batch_size
+            end_index = start_index + batch_size
+            if batch_index == full_batches - 1 and remainder == 1:
+                end_index += 1
+            yield start_index, end_index
+        if remainder >= 2:
+            yield full_batches * batch_size, total_samples
+
+    @staticmethod
+    def _build_multi_positive_batch(
+        original_graphs,
+        augmented_graphs,
+        positive_samples,
+        start_index,
+        end_index,
+        profile_training,
+        pin_memory,
     ):
-        """Yield (query_batch, positive_batches) from positive_samples."""
-        # Compute number of batches and last batch size
-        total_samples = len(original_graphs)
-        num_batches = total_samples // batch_size
-        last_batch_size = total_samples % batch_size
-
-        # Iterate over batches
-        for i in range(num_batches + (1 if last_batch_size >= 2 else 0)):
-            # Decide which batch type we are processing
-            if i < num_batches - 1:
-                # Regular full batch
-                start_idx = i * batch_size
-                end_idx = (i + 1) * batch_size
-            elif i == num_batches - 1:
-                # Last full batch (may absorb one sample)
-                start_idx = i * batch_size
-                if last_batch_size == 1:
-                    # Absorb the last sample
-                    end_idx = (i + 1) * batch_size + 1
-                else:
-                    # Normal end
-                    end_idx = (i + 1) * batch_size
-            else:
-                # Final partial batch (last_batch_size >= 2)
-                start_idx = num_batches * batch_size
-                end_idx = total_samples
-
-            # Batch indices
-            batch_indices = list(range(start_idx, end_idx))
-            # Iterate over each batch
-            # for i in range(0, len(original_graphs), batch_size):
-            # batch_indices = range(i, min(i + batch_size, len(original_graphs))) # (0,batch_size)
-
-            # Query batch
+        batch_indices = range(start_index, end_index)
+        query_context = torch.profiler.record_function("batch_collate_query") if profile_training else nullcontext()
+        with query_context:
             query_batch = Batch.from_data_list(
-                [original_graphs[j] for j in batch_indices]
-            )  # Batch handles node feature concat and edge_index offsets.
-            # Positive batches
-            positive_batches = []
-            num_positives = len(
-                positive_samples[0][1]
-            )  # All samples should have the same number of positives.
+                [original_graphs[index] for index in batch_indices],
+                exclude_keys=["cell", "gene"],
+            )
 
-            for pos_idx in range(num_positives):
-                pos_batch = Batch.from_data_list(
-                    [  # (j, [pos1, pos2, pos3])
-                        augmented_graphs[positive_samples[j][1][0]]
-                        if pos_idx == 0  # First positive uses augmented graph
-                        else original_graphs[
-                            positive_samples[j][1][pos_idx]
-                        ]  # Similar original graph
-                        for j in batch_indices
-                    ]
+        positive_batches = []
+        num_positives = len(positive_samples[start_index][1])
+        for positive_index in range(num_positives):
+            positive_context = (
+                torch.profiler.record_function("batch_collate_positive") if profile_training else nullcontext()
+            )
+            with positive_context:
+                positive_batch = Batch.from_data_list(
+                    [
+                        (
+                            augmented_graphs[positive_samples[index][1][0]]
+                            if positive_index == 0
+                            else original_graphs[positive_samples[index][1][positive_index]]
+                        )
+                        for index in batch_indices
+                    ],
+                    exclude_keys=["cell", "gene"],
                 )
-                positive_batches.append(pos_batch)
-            # # Prepare positive batches (alternative implementation)
-            # positive_batches = []
-            # max_positives = max(len(positive_samples[j][1]) for j in batch_indices)
-            # for pos_idx in range(max_positives): # iterate positives per query
-            #     pos_graphs = []
-            #     for j in batch_indices:
-            #         query_idx, pos_indices = positive_samples[j]
-            #         if pos_idx < len(pos_indices):
-            #             # first positive uses augmented graph
-            #             if pos_idx == 0:
-            #                 pos_graphs.append(augmented_graphs[pos_indices[pos_idx]])
-            #             else:
-            #                 pos_graphs.append(original_graphs[pos_indices[pos_idx]]) # similar original graph
-            #         else:
-            #             # if not enough positives, fall back to self
-            #             pos_graphs.append(original_graphs[j])
+            positive_batches.append(positive_batch)
 
-            #     pos_batch = Batch.from_data_list(pos_graphs)
-            #     positive_batches.append(pos_batch)
+        if pin_memory:
+            query_batch = query_batch.pin_memory()
+            positive_batches = [batch.pin_memory() for batch in positive_batches]
+        return query_batch, positive_batches
 
-            yield query_batch, positive_batches
+    @staticmethod
+    def estimate_cached_training_batch_bytes(
+        original_graphs,
+        augmented_graphs,
+        positive_samples,
+        batch_size,
+    ):
+        long_bytes = torch.empty((), dtype=torch.long).element_size()
+
+        def graph_bytes(graph):
+            return (
+                graph.x.numel() * graph.x.element_size()
+                + graph.edge_index.numel() * graph.edge_index.element_size()
+                + graph.x.size(0) * long_bytes
+            )
+
+        total_bytes = 0
+        batch_ranges = MoCoMultiPositive.iter_training_batch_ranges(len(original_graphs), batch_size)
+        for start_index, end_index in batch_ranges:
+            for index in range(start_index, end_index):
+                total_bytes += graph_bytes(original_graphs[index])
+                for positive_index, graph_index in enumerate(positive_samples[index][1]):
+                    source_graphs = augmented_graphs if positive_index == 0 else original_graphs
+                    total_bytes += graph_bytes(source_graphs[graph_index])
+        return total_bytes
+
+    @staticmethod
+    def build_cached_training_batches(
+        original_graphs,
+        augmented_graphs,
+        positive_samples,
+        batch_size,
+    ):
+        cached_batches = []
+        for query_batch, positive_batches in MoCoMultiPositive.prepare_multi_positive_batch(
+            original_graphs,
+            augmented_graphs,
+            positive_samples,
+            batch_size,
+            prefetch_batches=0,
+            pin_memory=False,
+        ):
+            cached_batches.append(
+                (
+                    ImmutableTrainingBatch.from_pyg_batch(query_batch),
+                    tuple(ImmutableTrainingBatch.from_pyg_batch(batch) for batch in positive_batches),
+                )
+            )
+        return tuple(cached_batches)
+
+    @staticmethod
+    def cached_training_batch_bytes(cached_batches):
+        return sum(
+            query_batch.nbytes() + sum(batch.nbytes() for batch in positive_batches)
+            for query_batch, positive_batches in cached_batches
+        )
+
+    @staticmethod
+    def _bounded_prefetch(batch_ranges, build_batch, prefetch_batches):
+        batch_queue = queue.Queue(maxsize=prefetch_batches)
+        producer_finished = object()
+        stop_event = threading.Event()
+
+        def put_unless_stopped(item):
+            while not stop_event.is_set():
+                try:
+                    batch_queue.put(item, timeout=0.1)
+                    return
+                except queue.Full:
+                    continue
+
+        def produce():
+            try:
+                for batch_range in batch_ranges:
+                    if stop_event.is_set():
+                        break
+                    put_unless_stopped(build_batch(*batch_range))
+            except BaseException as error:
+                put_unless_stopped(_PrefetchWorkerError(error))
+            finally:
+                put_unless_stopped(producer_finished)
+
+        producer = threading.Thread(
+            target=produce,
+            name="grasp-batch-prefetch",
+            daemon=True,
+        )
+        producer.start()
+        try:
+            while True:
+                item = batch_queue.get()
+                if item is producer_finished:
+                    break
+                if isinstance(item, _PrefetchWorkerError):
+                    raise item.error
+                yield item
+        finally:
+            stop_event.set()
+            producer.join()
+
+    @staticmethod
+    def prepare_cached_cuda_batches(cached_batches, device, prefetch_batches=2):
+        """Stage cached CPU batches through bounded pinned memory and a copy stream."""
+        if device.type != "cuda":
+            raise ValueError("Cached CUDA prefetch requires a CUDA device")
+        if prefetch_batches <= 0:
+            raise ValueError("prefetch_batches must be positive")
+
+        def pin_batch_group(batch_group):
+            query_batch, positive_batches = batch_group
+            return (
+                query_batch.pin_memory(),
+                tuple(batch.pin_memory() for batch in positive_batches),
+            )
+
+        wrapped_batches = ((batch_group,) for batch_group in cached_batches)
+        pinned_batches = MoCoMultiPositive._bounded_prefetch(
+            wrapped_batches,
+            pin_batch_group,
+            prefetch_batches,
+        )
+        copy_stream = torch.cuda.Stream(device=device)
+        compute_stream = torch.cuda.current_stream(device=device)
+
+        def transfer(batch_group):
+            query_batch, positive_batches = batch_group
+            with torch.cuda.stream(copy_stream):
+                cuda_batch_group = (
+                    query_batch.to(device, non_blocking=True),
+                    tuple(batch.to(device, non_blocking=True) for batch in positive_batches),
+                )
+                ready_event = torch.cuda.Event()
+                ready_event.record(copy_stream)
+            return batch_group, cuda_batch_group, ready_event
+
+        try:
+            current_transfer = transfer(next(pinned_batches))
+        except StopIteration:
+            return
+
+        for next_pinned_batch in pinned_batches:
+            next_transfer = transfer(next_pinned_batch)
+            _, cuda_batch_group, ready_event = current_transfer
+            compute_stream.wait_event(ready_event)
+            yield cuda_batch_group
+            current_transfer = next_transfer
+
+        _, cuda_batch_group, ready_event = current_transfer
+        compute_stream.wait_event(ready_event)
+        yield cuda_batch_group
+
+    @staticmethod
+    def prepare_multi_positive_batch(
+        original_graphs,
+        augmented_graphs,
+        positive_samples,
+        batch_size,
+        profile_training=False,
+        prefetch_batches=0,
+        pin_memory=False,
+    ):
+        """Yield ordered query and positive batches, optionally using bounded prefetch."""
+        batch_ranges = MoCoMultiPositive.iter_training_batch_ranges(len(original_graphs), batch_size)
+
+        def build_batch(start_index, end_index):
+            return MoCoMultiPositive._build_multi_positive_batch(
+                original_graphs,
+                augmented_graphs,
+                positive_samples,
+                start_index,
+                end_index,
+                profile_training,
+                pin_memory,
+            )
+
+        if prefetch_batches > 0:
+            yield from MoCoMultiPositive._bounded_prefetch(
+                batch_ranges,
+                build_batch,
+                prefetch_batches,
+            )
+        else:
+            for start_index, end_index in batch_ranges:
+                yield build_batch(start_index, end_index)

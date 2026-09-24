@@ -884,9 +884,8 @@ import functools
 
 def process_single_gene_pair(args):
     """Process one (cell, gene) pair inside a worker process."""
-    row, path, n_sectors, m_rings, k_neighbor = args
-    cell = row["cell"]
-    gene = row["gene"]
+    cell, gene, path, n_sectors, m_rings, k_neighbor, pair_seed = args
+    rng = np.random.RandomState(pair_seed)
 
     results = {}
 
@@ -912,36 +911,42 @@ def process_single_gene_pair(args):
             if total_count == 0:
                 return None
 
-            count_ratio = node_df["count"] / total_count
-            count_embed_list = [
-                emb.nonlinear_transform_embedding(x, dim=12) for x in count_ratio
-            ]
-            count_embed_np = np.array(count_embed_list)
+            count_ratio = node_df["count"].to_numpy(dtype=float) / total_count
+            count_embed_np = rng.rand(len(node_df), 12) * count_ratio[:, None]
 
             # Position one-hot.
             pos_map = {"inside": 0, "outside": 1, "boundary": 2, "edge": 3}
-            node_df["pos_mapped"] = (
-                node_df["nuclear_position"].map(pos_map).fillna(4).astype(int)
+            pos_mapped = (
+                node_df["nuclear_position"].map(pos_map).fillna(-1).to_numpy(dtype=int)
             )
-
-            # NOTE: enforce dtype=int to avoid mixed bool/int columns which become
-            # dtype=object when converting to numpy.
-            pos_dummies = pd.get_dummies(node_df["pos_mapped"], prefix="pos", dtype=int)
-            expected_cols = [f"pos_{i}" for i in range(4)]
-            pos_dummies = pos_dummies.reindex(columns=expected_cols, fill_value=0)
-            pos_features_np = pos_dummies.to_numpy()
+            pos_features_np = np.zeros((len(node_df), 4), dtype=int)
+            valid_positions = (pos_mapped >= 0) & (pos_mapped < 4)
+            pos_features_np[
+                np.flatnonzero(valid_positions),
+                pos_mapped[valid_positions],
+            ] = 1
 
             # Merge features.
-            node_features_np = np.hstack([count_embed_np, pos_features_np])
+            node_features_np = np.hstack(
+                [count_embed_np, pos_features_np]
+            ).astype(np.float32)
 
-            # 4. Adjacency handling (check empty matrices)
             try:
-                adj_df = pd.read_csv(adj_file)
-                if adj_df.empty:
-                    edge_index_np = np.empty((2, 0))
-                else:
-                    edge_index_np = np.array(adj_df.values.nonzero())
-            except FileNotFoundError:
+                with open(adj_file, "rb") as adjacency_handle:
+                    next(adjacency_handle)
+                    adjacency_bytes = adjacency_handle.read()
+                row_width = len(node_df) * 2
+                if len(adjacency_bytes) != len(node_df) * row_width:
+                    return None
+                adjacency_characters = np.frombuffer(
+                    adjacency_bytes,
+                    dtype=np.uint8,
+                ).reshape(len(node_df), row_width)
+                edge_index_np = np.array(
+                    np.nonzero(adjacency_characters[:, 0::2] == ord("1")),
+                    dtype=np.int64,
+                )
+            except (FileNotFoundError, StopIteration):
                 return None
 
             # Store in a temporary dict
@@ -965,18 +970,22 @@ def process_single_gene_pair(args):
 
 
 def generate_graph_data_target_parallel(
-    dataset, df, path, n_sectors, m_rings, k_neighbor, processes=8
+    dataset, df, path, n_sectors, m_rings, k_neighbor, processes=8, seed=2025
 ):
-    # Build argument list
     args_list = [
-        (row, path, n_sectors, m_rings, k_neighbor) for _, row in df.iterrows()
+        (
+            cell,
+            gene,
+            path,
+            n_sectors,
+            m_rings,
+            k_neighbor,
+            (int(seed) + pair_index * 0x9E3779B1) & 0xFFFFFFFF,
+        )
+        for pair_index, (cell, gene) in enumerate(
+            df[["cell", "gene"]].itertuples(index=False, name=None)
+        )
     ]
-
-    # Ensure spawn mode works on some platforms
-    try:
-        multiprocessing.set_start_method("spawn", force=True)
-    except RuntimeError:
-        pass
 
     original_graphs = []
     augmented_graphs = []
@@ -984,9 +993,8 @@ def generate_graph_data_target_parallel(
     print(f"Starting parallel processing with {processes} cores...")
 
     with Pool(processes=processes) as pool:
-        # imap_unordered is efficient because it does not preserve task order
-        iterator = pool.imap_unordered(
-            process_single_gene_pair, args_list, chunksize=10
+        iterator = pool.imap(
+            process_single_gene_pair, args_list, chunksize=32
         )
 
         for result in tqdm(

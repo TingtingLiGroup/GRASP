@@ -1277,7 +1277,7 @@ def plot_scatter_nolabel(
 
 def plot_embeddings_only(df, save_path, num_epochs, lr, visualize=False):
     """
-    Save embeddings only (no clustering/evaluation).
+    Visualize embeddings without clustering or evaluation.
 
     Args:
         df: DataFrame containing embeddings.
@@ -1289,11 +1289,6 @@ def plot_embeddings_only(df, save_path, num_epochs, lr, visualize=False):
     Returns:
         fig: Figure if visualize=True, else None.
     """
-    # Save embeddings.
-    df.to_csv(f"{save_path}/epoch{num_epochs}_lr{lr}_embedding.csv", index=False)
-    print(f"Embeddings saved to {save_path}/epoch{num_epochs}_lr{lr}_embedding.csv")
-
-    # Create a simple embedding visualization on demand.
     if visualize:
         # Extract features.
         features = df.drop(columns=["cell", "gene"]).values

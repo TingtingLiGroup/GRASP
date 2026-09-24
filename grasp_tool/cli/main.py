@@ -1,9 +1,171 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import sys
 from pathlib import Path
 from typing import Optional, Sequence
+
+
+_PARTITION_WORKER_STATE = {}
+_AUGMENT_WORKER_STATE = {}
+
+
+def _initialize_partition_worker(
+    df_grouped,
+    nuclear_grouped,
+    cell_radii,
+    fallback_radii,
+    allowed_genes_by_cell,
+    graph_root,
+    n_sectors,
+    m_rings,
+    k_neighbor,
+    fixed_radius,
+    epsilon,
+    write_distance_matrix,
+):
+    global _PARTITION_WORKER_STATE
+    _PARTITION_WORKER_STATE = {
+        "df_grouped": df_grouped,
+        "nuclear_grouped": nuclear_grouped,
+        "cell_radii": cell_radii,
+        "fallback_radii": fallback_radii,
+        "allowed_genes_by_cell": allowed_genes_by_cell,
+        "graph_root": graph_root,
+        "n_sectors": n_sectors,
+        "m_rings": m_rings,
+        "k_neighbor": k_neighbor,
+        "fixed_radius": fixed_radius,
+        "epsilon": epsilon,
+        "write_distance_matrix": write_distance_matrix,
+    }
+
+
+def _partition_cell(cell) -> int:
+    from grasp_tool.preprocessing.partition import (
+        classify_center_points_with_edge,
+        count_points_in_areas_same,
+        save_node_data_to_csv,
+    )
+
+    state = _PARTITION_WORKER_STATE
+    df_cell = state["df_grouped"].get_group(cell)
+    nuclear_df_cell = None
+    if state["nuclear_grouped"] is not None:
+        try:
+            nuclear_df_cell = state["nuclear_grouped"].get_group(cell)
+        except KeyError:
+            pass
+
+    fixed_radius = state["fixed_radius"]
+    cell_radii = state["cell_radii"]
+    if fixed_radius is not None:
+        radius = float(fixed_radius)
+    elif isinstance(cell_radii, dict) and cell in cell_radii:
+        radius = float(cell_radii[cell])
+    else:
+        radius = float(state["fallback_radii"].get(cell, 1.0))
+        if radius <= 0:
+            radius = 1.0
+
+    cell_dir = Path(state["graph_root"]) / str(cell)
+    cell_dir.mkdir(parents=True, exist_ok=True)
+    pair_count = 0
+    allowed_genes = state["allowed_genes_by_cell"]
+    if allowed_genes is not None:
+        allowed_genes = allowed_genes.get(str(cell), set())
+    for gene, df_cell_gene in df_cell.groupby("gene", sort=True, observed=True):
+        if allowed_genes is not None and str(gene) not in allowed_genes:
+            continue
+        _count_matrix, center_points, point_counts, is_virtual, is_edge = (
+            count_points_in_areas_same(
+                df_cell_gene,
+                state["n_sectors"],
+                state["m_rings"],
+                radius,
+            )
+        )
+        if nuclear_df_cell is not None and len(nuclear_df_cell) != 0:
+            nuclear_positions = classify_center_points_with_edge(
+                center_points,
+                nuclear_df_cell,
+                is_edge,
+                epsilon=state["epsilon"],
+            )
+        else:
+            nuclear_positions = ["unknown"] * len(center_points)
+
+        save_node_data_to_csv(
+            center_points=center_points,
+            is_virtual=is_virtual,
+            is_edge=is_edge,
+            plot_dir=str(cell_dir),
+            gene=str(gene),
+            node_counts=point_counts,
+            k=state["k_neighbor"],
+            nuclear_positions=nuclear_positions,
+            write_distance_matrix=state["write_distance_matrix"],
+        )
+        pair_count += 1
+    return pair_count
+
+
+def _initialize_augment_worker(
+    graph_root,
+    dropout_ratio,
+    angle_min,
+    angle_max,
+    seed,
+):
+    global _AUGMENT_WORKER_STATE
+    _AUGMENT_WORKER_STATE = {
+        "graph_root": graph_root,
+        "dropout_ratio": dropout_ratio,
+        "angle_min": angle_min,
+        "angle_max": angle_max,
+        "seed": seed,
+    }
+
+
+def _augment_cell(cell_name: str) -> int:
+    import numpy as np
+    import pandas as pd
+
+    from grasp_tool.preprocessing.augumentation import dropout_nodes, rotate_nodes
+
+    state = _AUGMENT_WORKER_STATE
+    root = Path(state["graph_root"])
+    cell_dir = root / cell_name
+    aug_dir = root / f"{cell_name}_aug"
+    aug_dir.mkdir(parents=True, exist_ok=True)
+
+    pair_count = 0
+    for node_path in sorted(cell_dir.glob("*_node_matrix.csv")):
+        gene = node_path.name[: -len("_node_matrix.csv")]
+        adj_path = cell_dir / f"{gene}_adj_matrix.csv"
+        if not adj_path.exists():
+            continue
+
+        seed_bytes = hashlib.blake2b(
+            f"{state['seed']}\0{cell_name}\0{gene}".encode(),
+            digest_size=8,
+        ).digest()
+        rng = np.random.default_rng(int.from_bytes(seed_bytes, "little"))
+        node_df = pd.read_csv(node_path)
+        adj_df = pd.read_csv(adj_path)
+        angle = float(rng.uniform(state["angle_min"], state["angle_max"]))
+        node_df = rotate_nodes(node_df, angle)
+        adj_df, node_df = dropout_nodes(
+            adj_df,
+            node_df,
+            state["dropout_ratio"],
+            rng=rng,
+        )
+        node_df.to_csv(aug_dir / node_path.name, index=False)
+        adj_df.to_csv(aug_dir / adj_path.name, index=False)
+        pair_count += 1
+    return pair_count
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -37,6 +199,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=2,
         help="Multiprocessing chunk size (default: 2)",
+    )
+    p_register.add_argument(
+        "--processes",
+        type=int,
+        default=4,
+        help="Registration worker processes (default: 4)",
     )
     p_register.add_argument(
         "--clip_to_cell",
@@ -144,10 +312,34 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Output directory (will create <cell>/ and write <gene>_*.csv)",
     )
+    p_partition.add_argument(
+        "--pairs_csv",
+        default=None,
+        help="Optional CSV with cell,gene columns; only listed pairs are partitioned",
+    )
     p_partition.add_argument("--n_sectors", type=int, default=20)
     p_partition.add_argument("--m_rings", type=int, default=10)
     p_partition.add_argument("--k_neighbor", type=int, default=5)
+    p_partition.add_argument(
+        "--processes",
+        type=int,
+        default=1,
+        help="Partition worker processes (default: 1)",
+    )
+    p_partition.add_argument(
+        "--radius",
+        type=float,
+        default=None,
+        help="Fixed partition radius; default uses per-cell radii from the PKL",
+    )
     p_partition.add_argument("--epsilon", type=float, default=0.1)
+    p_partition.add_argument(
+        "--write_distance_matrix",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help="Write legacy *_dis_matrix.csv files: 0=no, 1=yes (default: 0)",
+    )
     p_partition.add_argument(
         "--cells",
         type=str,
@@ -170,6 +362,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_aug.add_argument("--angle_min", type=float, default=0.0)
     p_aug.add_argument("--angle_max", type=float, default=360.0)
     p_aug.add_argument("--seed", type=int, default=2025)
+    p_aug.add_argument(
+        "--processes",
+        type=int,
+        default=1,
+        help="Augmentation worker processes (default: 1)",
+    )
 
     p_pkl = subparsers.add_parser(
         "build-train-pkl",
@@ -183,6 +381,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_pkl.add_argument("--m_rings", type=int, default=10)
     p_pkl.add_argument("--k_neighbor", type=int, default=5)
     p_pkl.add_argument("--processes", type=int, default=8)
+    p_pkl.add_argument("--seed", type=int, default=2025)
 
     return parser
 
@@ -218,6 +417,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             output_pkl=args.output_pkl,
             nc_demo=args.nc_demo,
             chunk_size=args.chunk_size,
+            processes=args.processes,
             clip_to_cell=bool(args.clip_to_cell),
             remove_outliers=bool(args.remove_outliers),
             verbose=bool(args.verbose),
@@ -239,12 +439,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return _run_partition_graphs(
             pkl_path=args.pkl,
             graph_root=args.graph_root,
+            pairs_csv=args.pairs_csv,
             n_sectors=args.n_sectors,
             m_rings=args.m_rings,
             k_neighbor=args.k_neighbor,
+            processes=args.processes,
+            fixed_radius=args.radius,
             epsilon=args.epsilon,
             cells_arg=args.cells,
             genes_arg=args.genes,
+            write_distance_matrix=bool(args.write_distance_matrix),
         )
 
     if args.command == "augment-graphs":
@@ -254,6 +458,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             angle_min=args.angle_min,
             angle_max=args.angle_max,
             seed=args.seed,
+            processes=args.processes,
         )
 
     if args.command == "build-train-pkl":
@@ -266,6 +471,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             m_rings=args.m_rings,
             k_neighbor=args.k_neighbor,
             processes=args.processes,
+            seed=args.seed,
         )
 
     parser.print_help()
@@ -339,6 +545,7 @@ def _run_register(
     output_pkl: str,
     nc_demo: Optional[int],
     chunk_size: int,
+    processes: int,
     clip_to_cell: bool,
     remove_outliers: bool,
     verbose: bool,
@@ -420,6 +627,7 @@ def _run_register(
         epsilon=epsilon,
         nc_demo=nc_demo,
         chunk_size=chunk_size,
+        processes=processes,
         clip_to_cell=clip_to_cell,
         remove_outliers=remove_outliers,
         verbose=verbose,
@@ -434,6 +642,7 @@ def _run_register(
             "input_pkl_file": pkl_file,
             "nc_demo": nc_demo,
             "chunk_size": chunk_size,
+            "processes": processes,
             "clip_to_cell": clip_to_cell,
             "remove_outliers": remove_outliers,
             "epsilon": epsilon,
@@ -573,22 +782,19 @@ def _run_partition_graphs(
     *,
     pkl_path: str,
     graph_root: str,
+    pairs_csv: Optional[str],
     n_sectors: int,
     m_rings: int,
     k_neighbor: int,
+    processes: int,
+    fixed_radius: Optional[float],
     epsilon: float,
     cells_arg: Optional[str],
     genes_arg: Optional[str],
+    write_distance_matrix: bool = False,
 ) -> int:
-    import math
-
+    import numpy as np
     import pandas as pd
-
-    from grasp_tool.preprocessing.partition import (
-        classify_center_points_with_edge,
-        count_points_in_areas_same,
-        save_node_data_to_csv,
-    )
 
     data = _load_registered_pkl(pkl_path)
     df_registered = data["df_registered"]
@@ -602,76 +808,105 @@ def _run_partition_graphs(
 
     requested_cells = _parse_comma_list(cells_arg)
     requested_genes = _parse_comma_list(genes_arg)
-
-    cells_all = sorted(df_registered["cell"].unique().tolist())
-    genes_all = sorted(df_registered["gene"].unique().tolist())
-
-    cells = requested_cells or cells_all
-    genes = requested_genes or genes_all
-
-    root = Path(graph_root)
-    root.mkdir(parents=True, exist_ok=True)
+    if fixed_radius is not None and fixed_radius <= 0:
+        raise ValueError("--radius must be greater than 0")
 
     required_cols = {"cell", "gene", "x_c_s", "y_c_s"}
     missing = required_cols - set(df_registered.columns)
     if missing:
         raise ValueError(f"df_registered missing required columns: {sorted(missing)}")
 
-    for cell in cells:
-        cell_dir = root / str(cell)
-        cell_dir.mkdir(parents=True, exist_ok=True)
+    root = Path(graph_root)
+    root.mkdir(parents=True, exist_ok=True)
 
-        df_cell = df_registered[df_registered["cell"] == cell]
-        if len(df_cell) == 0:
-            continue
-
-        if isinstance(cell_radii, dict) and cell in cell_radii:
-            r = float(cell_radii[cell])
-        else:
-            r_sq_max = float(((df_cell["x_c_s"] ** 2) + (df_cell["y_c_s"] ** 2)).max())
-            r = math.sqrt(max(r_sq_max, 0.0))
-            if r <= 0:
-                r = 1.0
-
-        nuclear_df_cell = None
-        if (
-            nuclear_boundary_df_registered is not None
-            and "cell" in nuclear_boundary_df_registered.columns
-        ):
-            nuclear_df_cell = nuclear_boundary_df_registered[
-                nuclear_boundary_df_registered["cell"] == cell
-            ]
-
-        for gene in genes:
-            df_cell_gene = df_cell[df_cell["gene"] == gene]
-            if len(df_cell_gene) == 0:
-                continue
-
-            _count_matrix, center_points, point_counts, is_virtual, is_edge = (
-                count_points_in_areas_same(df_cell_gene.copy(), n_sectors, m_rings, r)
+    selected_df = df_registered
+    if requested_cells:
+        selected_df = selected_df[selected_df["cell"].isin(requested_cells)]
+    if requested_genes:
+        selected_df = selected_df[selected_df["gene"].isin(requested_genes)]
+    allowed_genes_by_cell = None
+    if pairs_csv is not None:
+        pairs = pd.read_csv(pairs_csv)
+        missing_pair_columns = {"cell", "gene"} - set(pairs.columns)
+        if missing_pair_columns:
+            raise ValueError(
+                f"pairs CSV missing required columns: {sorted(missing_pair_columns)}"
             )
-
-            if nuclear_df_cell is not None and len(nuclear_df_cell) != 0:
-                nuclear_positions = classify_center_points_with_edge(
-                    center_points,
-                    nuclear_df_cell,
-                    is_edge,
-                    epsilon=epsilon,
-                )
-            else:
-                nuclear_positions = ["unknown"] * len(center_points)
-
-            save_node_data_to_csv(
-                center_points=center_points,
-                is_virtual=is_virtual,
-                is_edge=is_edge,
-                plot_dir=str(cell_dir),
-                gene=str(gene),
-                node_counts=point_counts,
-                k=k_neighbor,
-                nuclear_positions=nuclear_positions,
+        pairs = pairs[["cell", "gene"]].drop_duplicates()
+        allowed_genes_by_cell = {
+            str(cell): set(group["gene"].astype(str))
+            for cell, group in pairs.groupby("cell", sort=False, observed=True)
+        }
+        available_cells = set(selected_df["cell"].astype(str).unique())
+        missing_cells = set(allowed_genes_by_cell) - available_cells
+        if missing_cells:
+            raise ValueError(
+                f"pairs CSV contains cells absent from df_registered: "
+                f"{sorted(missing_cells)[:10]}"
             )
+        cells = sorted(
+            cell
+            for cell in selected_df["cell"].unique().tolist()
+            if str(cell) in allowed_genes_by_cell
+        )
+    else:
+        cells = sorted(selected_df["cell"].unique().tolist())
 
+    fallback_radii = {}
+    if fixed_radius is None:
+        radius_sq = selected_df["x_c_s"] ** 2 + selected_df["y_c_s"] ** 2
+        fallback_radii = np.sqrt(
+            radius_sq.groupby(selected_df["cell"], observed=True).max().clip(lower=0)
+        ).to_dict()
+
+    nuclear_grouped = None
+    if (
+        nuclear_boundary_df_registered is not None
+        and "cell" in nuclear_boundary_df_registered.columns
+    ):
+        nuclear_grouped = nuclear_boundary_df_registered.groupby(
+            "cell", sort=False, observed=True
+        )
+
+    df_grouped = selected_df.groupby("cell", sort=False, observed=True)
+    worker_count = max(1, int(processes))
+    initargs = (
+        df_grouped,
+        nuclear_grouped,
+        cell_radii,
+        fallback_radii,
+        allowed_genes_by_cell,
+        str(root),
+        n_sectors,
+        m_rings,
+        k_neighbor,
+        fixed_radius,
+        epsilon,
+        write_distance_matrix,
+    )
+    total_pairs = 0
+    if worker_count == 1:
+        _initialize_partition_worker(*initargs)
+        for cell in cells:
+            total_pairs += _partition_cell(cell)
+    else:
+        from multiprocessing import Pool, cpu_count
+        from tqdm import tqdm
+
+        worker_count = min(worker_count, cpu_count())
+        with Pool(
+            processes=worker_count,
+            initializer=_initialize_partition_worker,
+            initargs=initargs,
+        ) as pool:
+            for pair_count in tqdm(
+                pool.imap_unordered(_partition_cell, cells, chunksize=8),
+                total=len(cells),
+                desc="Partitioning cells",
+            ):
+                total_pairs += pair_count
+
+    print(f"Wrote {total_pairs:,} graphs across {len(cells):,} cells")
     return 0
 
 
@@ -682,46 +917,53 @@ def _run_augment_graphs(
     angle_min: float,
     angle_max: float,
     seed: int,
+    processes: int,
 ) -> int:
-    import numpy as np
-    import pandas as pd
-
-    from grasp_tool.preprocessing.augumentation import dropout_nodes, rotate_nodes
-
     if dropout_ratio < 0 or dropout_ratio >= 1:
         raise ValueError("--dropout_ratio must be in [0, 1)")
     if angle_max < angle_min:
         raise ValueError("--angle_max must be >= --angle_min")
 
-    rng = np.random.default_rng(seed)
-
     root = Path(graph_root)
     if not root.exists():
         raise FileNotFoundError(f"graph_root not found: {graph_root}")
 
-    for cell_dir in sorted([p for p in root.iterdir() if p.is_dir()]):
-        if cell_dir.name.endswith("_aug"):
-            continue
+    cell_names = sorted(
+        path.name
+        for path in root.iterdir()
+        if path.is_dir() and not path.name.endswith("_aug")
+    )
+    initargs = (
+        str(root),
+        dropout_ratio,
+        angle_min,
+        angle_max,
+        seed,
+    )
+    worker_count = max(1, int(processes))
+    total_pairs = 0
+    if worker_count == 1:
+        _initialize_augment_worker(*initargs)
+        for cell_name in cell_names:
+            total_pairs += _augment_cell(cell_name)
+    else:
+        from multiprocessing import Pool, cpu_count
+        from tqdm import tqdm
 
-        aug_dir = root / f"{cell_dir.name}_aug"
-        aug_dir.mkdir(parents=True, exist_ok=True)
+        worker_count = min(worker_count, cpu_count())
+        with Pool(
+            processes=worker_count,
+            initializer=_initialize_augment_worker,
+            initargs=initargs,
+        ) as pool:
+            for pair_count in tqdm(
+                pool.imap_unordered(_augment_cell, cell_names, chunksize=8),
+                total=len(cell_names),
+                desc="Augmenting cells",
+            ):
+                total_pairs += pair_count
 
-        for node_path in sorted(cell_dir.glob("*_node_matrix.csv")):
-            gene = node_path.name[: -len("_node_matrix.csv")]
-            adj_path = cell_dir / f"{gene}_adj_matrix.csv"
-            if not adj_path.exists():
-                continue
-
-            node_df = pd.read_csv(node_path)
-            adj_df = pd.read_csv(adj_path)
-
-            angle = float(rng.uniform(angle_min, angle_max))
-            node_df = rotate_nodes(node_df, angle)
-            adj_df, node_df = dropout_nodes(adj_df, node_df, dropout_ratio)
-
-            node_df.to_csv(aug_dir / node_path.name, index=False)
-            adj_df.to_csv(aug_dir / adj_path.name, index=False)
-
+    print(f"Wrote {total_pairs:,} augmented graphs across {len(cell_names):,} cells")
     return 0
 
 
@@ -735,6 +977,7 @@ def _run_build_train_pkl(
     m_rings: int,
     k_neighbor: int,
     processes: int,
+    seed: int,
 ) -> int:
     import pickle
 
@@ -764,7 +1007,14 @@ def _run_build_train_pkl(
         m_rings=m_rings,
         k_neighbor=k_neighbor,
         processes=processes,
+        seed=seed,
     )
+    if len(original_graphs) != len(df_pairs) or len(augmented_graphs) != len(df_pairs):
+        raise RuntimeError(
+            "Some graph pairs could not be loaded: "
+            f"expected {len(df_pairs)}, got {len(original_graphs)} original and "
+            f"{len(augmented_graphs)} augmented graphs"
+        )
 
     gene_labels = [g.gene for g in original_graphs]
     cell_labels = [g.cell for g in original_graphs]
@@ -781,13 +1031,16 @@ def _run_build_train_pkl(
             "m_rings": m_rings,
             "k_neighbor": k_neighbor,
             "processes": processes,
+            "seed": seed,
             "pairs_csv": pairs_csv,
         },
     }
 
     out_path = Path(output_pkl)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    with out_path.open("wb") as f:
-        pickle.dump(payload, f)
+    temporary_path = out_path.with_suffix(f"{out_path.suffix}.tmp")
+    with temporary_path.open("wb") as f:
+        pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
+    temporary_path.replace(out_path)
 
     return 0

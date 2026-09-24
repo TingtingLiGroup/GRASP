@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "grasp-tool"
-version = "0.1.3"
+version = "0.2.0"
 description = "GRASP: a graph-based representation learning toolkit for spatial transcriptomics"
 authors = ["wzx <unknown@example.com>"]
 readme = "README.md"
@@ -55,6 +55,7 @@ isort = "^5.13"
 mypy = "^1.13"
 twine = "^6.0"
 build = "^1.2"
+psutil = "^7.1.3"
 
 [build-system]
 requires = ["poetry-core"]

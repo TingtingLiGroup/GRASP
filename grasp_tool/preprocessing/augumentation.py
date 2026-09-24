@@ -12,12 +12,12 @@ def rotate_nodes(node_matrix, angle):
     return node_matrix
 
 
-def dropout_nodes(adj_matrix, node_matrix, dropout_ratio):
+def dropout_nodes(adj_matrix, node_matrix, dropout_ratio, rng=None):
     real_nodes = node_matrix[node_matrix["is_virtual"] == 0].index
-    # n = len(node_matrix)
     num_real_nodes = len(real_nodes)
     num_drop = int(num_real_nodes * dropout_ratio)
-    drop_nodes = np.random.choice(real_nodes, size=num_drop, replace=False)
+    random_generator = rng if rng is not None else np.random
+    drop_nodes = random_generator.choice(real_nodes, size=num_drop, replace=False)
     node_matrix.loc[drop_nodes, "is_virtual"] = 1
     for node in drop_nodes:
         adj_matrix.iloc[node, :] = 0

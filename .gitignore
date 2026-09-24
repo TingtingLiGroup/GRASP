@@ -12,3 +12,7 @@ dist/
 outputs/
 
 .DS_Store
+
+.sisyphus/
+uv.lock
+OPTIMIZATION_SUMMARY.md

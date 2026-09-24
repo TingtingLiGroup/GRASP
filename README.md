@@ -366,9 +366,70 @@ python -m grasp_tool train-moco \
   --m 10 \
   --num_epoch 300 \
   --batch_size 64 \
+  --lrs 0.001 \
   --cuda_device 0 \
   --output_dir outputs/embeddings
 ```
+
+By default, checkpoints are still saved every 20 epochs, while embeddings are
+evaluated only at the final epoch and t-SNE/UMAP plots are disabled. Use
+`--eval_freq 20` for intermediate embeddings, `--eval_at_start 1` for an epoch
+0 embedding, or `--visualize 1` when plots are required.
+
+Training batches are collated sequentially by default. Two opt-in throughput
+paths are available for large, multi-epoch runs:
+
+```bash
+# Recommended high-throughput path for long single-GPU runs.
+python -m grasp_tool train-moco ... \
+  --cache_train_batches 1 \
+  --pipeline_cached_h2d 1 \
+  --foreach_momentum 1
+
+# Experimental bounded producer (at most two five-view batches).
+python -m grasp_tool train-moco ... --prefetch_batches 2
+```
+
+`--cache_train_batches 1` prints an additional-RAM estimate before allocation.
+It gives the largest steady-state speedup, but each independent multi-GPU
+process creates its own cache. `--pipeline_cached_h2d 1` requires that cache,
+copies only a bounded number of batches through pinned staging memory, and
+overlaps the next H2D copy with current GPU compute. It does not pin the full
+cache; `--cached_h2d_prefetch_batches` controls the staging depth and defaults
+to `2`. `--foreach_momentum 1` batches the mathematically identical momentum
+encoder updates into fewer CUDA launches.
+
+All three switches default to `0` because the full cache can require substantial
+host RAM and throughput depends on the machine. `--prefetch_batches` also
+defaults to `0`: on the 111,589-graph CosMx workload, concurrent PyG collation
+contended with GPU launches and was slower than sequential collation. The optional
+`--pin_prefetched_batches 1` switch only pins the bounded queue; it never pins
+the full PKL or full cache, and also defaults to `0`.
+
+For experiments that allow small numerical differences while keeping the same
+loss, model structure, positive count, and execution structure, the validated
+optional path is TF32:
+
+```bash
+python -m grasp_tool train-moco ... \
+  --cache_train_batches 1 \
+  --pipeline_cached_h2d 1 \
+  --cached_h2d_prefetch_batches 2 \
+  --foreach_momentum 1 \
+  --matmul_precision high
+```
+
+TF32 improved the 10,000-graph matched steady-state benchmark by about `3.5%`.
+In a three-seed, 20-epoch validation on 111,589 graphs, its loss curves, linear
+CKA, kNN overlap, ARI, and NMI all remained within the original baseline's
+seed-to-seed variation. It still defaults to `highest` because it is not
+strictly numerically equivalent.
+
+An aggressive combination (`--fuse_positive_encoders 1 --num_positive 2
+--reconstruction_negative_ratio 10`) reached `26.549` seconds/epoch versus
+`50.284` for the strict baseline, but failed the loss-curve variation gate.
+It remains available for research experiments and is not the recommended
+production configuration.
 
 If you want to use JS for positive sampling:
 
@@ -408,13 +469,33 @@ python -m grasp_tool train-moco \
   --dataset simulated1 \
   --pkl outputs/train.pkl \
   --num_clusters 8 \
-  --label_file /path/to/simulated1_label.csv
+  --label_file /path/to/simulated1_label.csv \
+  --eval_freq 20
 ```
 
 Notes:
 
 - `--num_clusters` enables clustering evaluation; if omitted, no clustering metrics are computed.
 - If the label file cannot be loaded, evaluation falls back to `unknown` labels (metrics will not be meaningful).
+
+If multiple GPUs are available, independent learning rates can run in parallel
+without changing a single training run:
+
+```bash
+python scripts/train_multi_lr.py \
+  --lrs 0.001 0.002 0.005 0.01 \
+  --cuda_devices 0 1 2 3 \
+  --output_dir outputs/embeddings \
+  -- \
+  --dataset simulated1 \
+  --pkl outputs/train.pkl \
+  --num_epoch 300 \
+  --batch_size 64
+```
+
+Each process loads `train.pkl` separately. If `--cache_train_batches 1` is
+forwarded, each process also builds a separate CPU batch cache, so check host
+RAM before launching several large runs.
 
 ## Outputs
 
@@ -473,9 +554,10 @@ Output directory layout (`<graph_root>`):
 
 - `<graph_root>/<cell>/<gene>_node_matrix.csv`
 - `<graph_root>/<cell>/<gene>_adj_matrix.csv`
-- `<graph_root>/<cell>/<gene>_dis_matrix.csv`
+- `<graph_root>/<cell>/<gene>_dis_matrix.csv` only with `--write_distance_matrix 1`
 
-These CSVs are the on-disk graph representation consumed by `build-train-pkl`.
+The node and adjacency CSVs are consumed by `build-train-pkl`. The legacy
+distance CSV has no downstream consumer and is skipped by default.
 
 ### augment-graphs
 
@@ -576,6 +658,7 @@ This command is a pass-through wrapper. Common knobs:
 - `--k_neighbor`: kNN graph connectivity
 - `--cells`, `--genes`: restrict scope (smoke test)
 - `--epsilon`: boundary classification tolerance
+- `--write_distance_matrix`: `1` to emit the unused legacy distance CSV; default `0`
 
 ### augment-graphs
 
@@ -598,7 +681,7 @@ This command runs the packaged training entrypoint (`grasp_tool.cli.train_moco`)
 
 - `--pkl`: training PKL built by `build-train-pkl`
 - `--output_dir`: output root directory
-- `--lrs`: learning rate list (e.g. `--lrs 0.001` or `--lrs 0.001 0.002`)
+- `--lrs`: learning rate list; specify one rate for a single run (e.g. `--lrs 0.001`)
 - `--use_gradient_clipping`: `1` (default) to clip gradients, `0` to disable
 - `--gradient_clip_norm`: max norm for gradient clipping
 - `--js` + `--js_file`: use JS distance for positive sampling
@@ -606,8 +689,25 @@ This command runs the packaged training entrypoint (`grasp_tool.cli.train_moco`)
 - `--seed`: reproducibility
 - `--num_epoch`, `--batch_size`: training schedule
 - `--cuda_device`: GPU index
+- `--prefetch_batches`: bounded background CPU collation depth; default `0`
+- `--pin_prefetched_batches`: `1` to pin only bounded prefetched batches; default `0`
+- `--cache_train_batches`: `1` to prebuild reusable immutable CPU tensor batches; default `0`
+- `--pipeline_cached_h2d`: `1` to pipeline cached batches through bounded pinned staging; requires `--cache_train_batches 1`
+- `--cached_h2d_prefetch_batches`: pinned staging depth; default `2`
+- `--foreach_momentum`: `1` to batch momentum-encoder EMA updates with foreach kernels; default `0`
+- `--matmul_precision`: `highest` (default), `high` (TF32 where supported), or `medium`
+- `--fuse_positive_encoders`: `1` to combine all positive views into one key-encoder call; default `0`
+- `--num_positive`: positive views per query; default `4`
+- `--reconstruction_negative_ratio`: sampled reconstruction negatives per positive; `0` (default) keeps exact dense BCE
+- `--eval_freq`: evaluate every N epochs; `0` (default) means final epoch only
+- `--eval_at_start`: `1` to evaluate epoch 0; default `0`
+- `--visualize`: `1` to create t-SNE/UMAP plots; default `0`
 - `--num_clusters`: affects clustering evaluation (for very small datasets, set it <= num graphs)
 - `--label_file`: optional ground-truth label CSV path (used by clustering evaluation; see above)
+
+Each run also writes `training_history_lr<lr>.csv` with per-epoch loss,
+learning-rate, and pure-training wall time for convergence and reproducibility
+checks.
 
 ## Reproducibility tips
 

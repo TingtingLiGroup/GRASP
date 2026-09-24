@@ -424,6 +424,43 @@ def compare_graphs(
     return js
 
 
+def _build_pair_indices_by_gene(df):
+    """Index observed transcript rows by gene and cell without materializing empty categorical pairs."""
+    pair_indices_by_gene = {}
+    grouped_indices = df.groupby(
+        ["gene", "cell"],
+        observed=True,
+        sort=False,
+    ).indices
+    for (gene, cell), row_indices in grouped_indices.items():
+        pair_indices_by_gene.setdefault(gene, []).append((cell, row_indices))
+
+    for pair_indices in pair_indices_by_gene.values():
+        pair_indices.sort(key=lambda item: item[0])
+    return pair_indices_by_gene
+
+
+def _iter_gene_cell_frames(df, gene, cell_list, pair_indices=None):
+    if pair_indices is not None:
+        for cell, row_indices in pair_indices:
+            yield cell, df.iloc[row_indices]
+        return
+
+    gene_df = df[df["gene"] == gene]
+    for cell in cell_list:
+        yield cell, gene_df[gene_df["cell"] == cell]
+
+
+def _compute_gene_distance_matrices(df, gene, pair_indices):
+    distance_matrices = {}
+    for cell, row_indices in pair_indices:
+        if len(row_indices) <= 1:
+            continue
+        positions = df.iloc[row_indices][["x_c_s", "y_c_s"]].values
+        distance_matrices[(cell, gene)] = distance_matrix(positions, positions)
+    return distance_matrices
+
+
 def find_gene_optimal_r(
     gene,
     df,
@@ -433,6 +470,7 @@ def find_gene_optimal_r(
     r_max=0.6,
     r_step=0.03,
     dist_dict=None,
+    pair_indices=None,
 ):
     """
     Find an optimal r value for a gene (use the max r across cells).
@@ -450,16 +488,17 @@ def find_gene_optimal_r(
     """
     logger.info(f"Computing optimal r for gene {gene}")
 
-    # All transcripts for this gene.
-    gene_df = df[df["gene"] == gene]
-
     cell_r_values = {}
     cell_dist_matrices = {}  # store distance matrix per cell
     transcript_counts = {}  # transcript count per cell
 
     # Compute r per cell.
-    for cell in cell_list:
-        cell_df = gene_df[gene_df["cell"] == cell]
+    for cell, cell_df in _iter_gene_cell_frames(
+        df,
+        gene,
+        cell_list,
+        pair_indices,
+    ):
         transcript_count = len(cell_df)
         transcript_counts[cell] = transcript_count
 
@@ -507,7 +546,7 @@ def find_gene_optimal_r(
         1 for count in transcript_counts.values() if count == 1
     )
     multi_transcript_cells = sum(1 for count in transcript_counts.values() if count > 1)
-    zero_transcript_cells = sum(1 for count in transcript_counts.values() if count == 0)
+    zero_transcript_cells = total_cells - len(transcript_counts)
 
     # If no r values are valid, return a safer default.
     if not cell_r_values:
@@ -548,6 +587,7 @@ def precompute_portraits_for_gene(
     use_same_r=True,
     use_vectorized=True,
     dist_dict=None,
+    pair_indices=None,
 ):
     """
     Precompute network portraits for all cells of a gene.
@@ -571,11 +611,11 @@ def precompute_portraits_for_gene(
     logger.info(f"Start precomputing network portraits for gene {gene}")
     start_time = time.time()
 
-    # Filter transcripts for this gene.
-    gene_df = df[df["gene"] == gene]
-
     # Ensure there is data.
-    if len(gene_df) == 0:
+    if pair_indices is not None and not pair_indices:
+        logger.warning(f"Gene {gene} has no transcript records")
+        return distributions
+    if pair_indices is None and not (df["gene"] == gene).any():
         logger.warning(f"Gene {gene} has no transcript records")
         return distributions
 
@@ -584,21 +624,33 @@ def precompute_portraits_for_gene(
     cell_dist_matrices = {}
     if use_same_r:
         gene_r, cell_dist_matrices = find_gene_optimal_r(
-            gene, df, cell_list, threshold, r_min, r_max, r_step, dist_dict
+            gene,
+            df,
+            cell_list,
+            threshold,
+            r_min,
+            r_max,
+            r_step,
+            dist_dict,
+            pair_indices,
         )
 
     # Process each cell.
-    for cell in tqdm(
+    cell_frames = _iter_gene_cell_frames(
+        df,
+        gene,
         cell_list,
+        pair_indices,
+    )
+    for cell, cell_df in tqdm(
+        cell_frames,
         desc=f"Processing cells for gene {gene}",
         leave=False,
         disable=not sys.stdout.isatty(),
     ):
-        # Filter transcripts for this cell.
-        cell_df = gene_df[gene_df["cell"] == cell]
         transcript_count = len(cell_df)
 
-        # Skip cells with no transcripts.
+        # Keep the legacy fallback usable for direct callers without an index.
         if transcript_count == 0:
             logger.debug(f"Cell {cell}, gene {gene} has no transcripts; skipping")
             continue
@@ -650,11 +702,12 @@ def precompute_portraits_for_gene(
                     dists=dists,
                 )
 
-            # Build graph (reuse the distance matrix).
             G = build_weighted_graph(cell_df, r, dists=dists)
-
-            # Compute portrait and weighted distribution.
-            portrait, N = get_network_portrait(G, bin_size, use_vectorized)
+            portrait, N = get_network_portrait(
+                G,
+                bin_size,
+                use_vectorized,
+            )
             weighted_dist = compute_weighted_distribution(portrait, N)
 
             distributions[(cell, gene)] = (weighted_dist, N, r)
@@ -934,8 +987,16 @@ def calculate_js_distances(
     # Unique cells and genes.
     cell_list = sorted(df["cell"].unique())
     gene_list = sorted(df["gene"].unique())
+    pair_indices_by_gene = _build_pair_indices_by_gene(df)
+    observed_pair_count = sum(
+        len(pair_indices)
+        for pair_indices in pair_indices_by_gene.values()
+    )
 
-    logger.info(f"Dataset contains {len(cell_list)} cells and {len(gene_list)} genes")
+    logger.info(
+        f"Dataset contains {len(cell_list)} cells, {len(gene_list)} genes, "
+        f"and {observed_pair_count} observed (cell,gene) pairs"
+    )
 
     # Resolve output directory.
     if output_dir is None:
@@ -995,51 +1056,45 @@ def calculate_js_distances(
 
     # Analyze transcript distribution (optional diagnostics).
     logger.info("Analyzing transcript distribution (optional diagnostics)...")
+    diagnostic_start = time.perf_counter()
     try:
         analyze_transcript_distribution(df, output_dir)
     except Exception as e:
         logger.warning(f"Transcript distribution analysis failed: {e}")
+    logger.info(
+        f"Transcript distribution analysis elapsed {time.perf_counter() - diagnostic_start:.2f}s"
+    )
 
     # Stage 0: precompute all distance matrices globally.
     logger.info("Stage 0: precomputing all distance matrices")
+    stage_start = time.perf_counter()
     dist_dict = {}  # Global distance matrix dict {(cell, gene): dist_matrix}
 
-    # Precompute all distance matrices using a thread pool.
+    # Submit one task per gene instead of one task per observed pair.
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
-        futures = {}
-
-        # Submit all computation tasks.
-        for gene in gene_list:
-            gene_df = df[df["gene"] == gene]
-
-            for cell in cell_list:
-                cell_df = gene_df[gene_df["cell"] == cell]
-                # Skip cells with insufficient transcripts.
-                if len(cell_df) <= 1:
-                    continue
-
-                # Define a local function to compute distance matrices.
-                def calc_dist_matrix(c_df):
-                    positions = c_df[["x_c_s", "y_c_s"]].values
-                    return distance_matrix(positions, positions)
-
-                # Submit task.
-                futures[(cell, gene)] = executor.submit(calc_dist_matrix, cell_df)
-
-        # Collect results.
-        for (cell, gene), future in tqdm(
-            futures.items(),
+        futures = {
+            gene: executor.submit(
+                _compute_gene_distance_matrices,
+                df,
+                gene,
+                pair_indices_by_gene.get(gene, ()),
+            )
+            for gene in gene_list
+        }
+        for gene in tqdm(
+            gene_list,
             desc="Precomputing distance matrices",
             disable=not sys.stdout.isatty(),
         ):
             try:
-                dist_dict[(cell, gene)] = future.result()
+                dist_dict.update(futures[gene].result())
             except Exception as e:
-                logger.error(
-                    f"Failed to compute distance matrix for cell={cell}, gene={gene}: {e}"
-                )
+                logger.error(f"Failed to compute distance matrices for gene={gene}: {e}")
 
-    logger.info(f"Distance matrix precompute done; {len(dist_dict)} (cell,gene) pairs")
+    logger.info(
+        f"Distance matrix precompute done; {len(dist_dict)} (cell,gene) pairs, "
+        f"elapsed {time.perf_counter() - stage_start:.2f}s"
+    )
 
     # Auto-select parameters based on precomputed distance matrices.
     if auto_r_min or auto_r_max or auto_bin_size:
@@ -1110,6 +1165,7 @@ def calculate_js_distances(
 
     # Stage 1: precompute all network portraits (including auto-selecting r).
     logger.info("Stage 1: precomputing network portraits")
+    stage_start = time.perf_counter()
     portraits = {}
 
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
@@ -1128,6 +1184,7 @@ def calculate_js_distances(
                 use_same_r,
                 use_vectorized,
                 dist_dict,  # pass the global distance matrix dict
+                pair_indices_by_gene.get(gene, ()),
             ): gene
             for gene in gene_list
         }
@@ -1149,10 +1206,14 @@ def calculate_js_distances(
             except Exception as e:
                 logger.error(f"Gene {gene} precompute failed: {e}")
 
-    logger.info(f"Network portrait precompute done; {len(portraits)} (cell,gene) pairs")
+    logger.info(
+        f"Network portrait precompute done; {len(portraits)} (cell,gene) pairs, "
+        f"elapsed {time.perf_counter() - stage_start:.2f}s"
+    )
 
     # Stage 2: compute JS divergence.
     logger.info("Stage 2: computing JS divergence")
+    stage_start = time.perf_counter()
     all_distances = []
 
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
@@ -1162,7 +1223,10 @@ def calculate_js_distances(
                 find_js_distances_for_gene,
                 gene,
                 df,
-                cell_list,
+                [
+                    cell
+                    for cell, _ in pair_indices_by_gene.get(gene, ())
+                ],
                 portraits,
                 bin_size,
                 max_count,
@@ -1187,6 +1251,10 @@ def calculate_js_distances(
                 )
             except Exception as e:
                 logger.error(f"Gene {gene} JS divergence failed: {e}")
+    logger.info(
+        f"JS divergence computation done; {len(all_distances)} records, "
+        f"elapsed {time.perf_counter() - stage_start:.2f}s"
+    )
 
     # Clean up distance matrices to free memory.
     dist_dict.clear()
@@ -1437,7 +1505,7 @@ def analyze_transcript_distribution(df, output_dir=None):
     unique_cells = df["cell"].nunique()
 
     # Transcripts per gene.
-    gene_transcript_counts = df.groupby("gene").size()
+    gene_transcript_counts = df.groupby("gene", observed=True).size()
 
     if not gene_transcript_counts.empty:
         gene_stats_values = {
@@ -1460,7 +1528,7 @@ def analyze_transcript_distribution(df, output_dir=None):
     gene_stats = {"total_genes": int(unique_genes), **gene_stats_values}
 
     # Transcripts per cell.
-    cell_transcript_counts = df.groupby("cell").size()
+    cell_transcript_counts = df.groupby("cell", observed=True).size()
     if not cell_transcript_counts.empty:
         cell_stats_values = {
             "transcript_per_cell_mean": float(cell_transcript_counts.mean()),
@@ -1482,7 +1550,10 @@ def analyze_transcript_distribution(df, output_dir=None):
     cell_stats = {"total_cells": int(unique_cells), **cell_stats_values}
 
     # Transcripts per (cell, gene) pair.
-    cell_gene_transcript_counts = df.groupby(["cell", "gene"]).size()
+    cell_gene_transcript_counts = df.groupby(
+        ["cell", "gene"],
+        observed=True,
+    ).size()
     if not cell_gene_transcript_counts.empty:
         pair_stats_values = {
             "transcript_per_pair_mean": float(cell_gene_transcript_counts.mean()),
@@ -1508,17 +1579,15 @@ def analyze_transcript_distribution(df, output_dir=None):
 
     # Count genes that are mostly single-transcript.
     genes_with_mostly_single_transcripts = 0
-    if (
-        unique_genes > 0 and not cell_gene_transcript_counts.empty
-    ):  # Avoid processing if no genes or no pairs
-        for gene in df["gene"].unique():
-            gene_pairs = cell_gene_transcript_counts[
-                cell_gene_transcript_counts.index.get_level_values("gene") == gene
-            ]
-            if not gene_pairs.empty:
-                single_transcript_ratio = (gene_pairs == 1).sum() / len(gene_pairs)
-                if single_transcript_ratio > 0.8:  # >80% pairs are single-transcript
-                    genes_with_mostly_single_transcripts += 1
+    if unique_genes > 0 and not cell_gene_transcript_counts.empty:
+        single_transcript_ratios = (
+            cell_gene_transcript_counts.eq(1)
+            .groupby(level="gene", observed=True)
+            .mean()
+        )
+        genes_with_mostly_single_transcripts = int(
+            (single_transcript_ratios > 0.8).sum()
+        )
 
     problem_stats = {
         "genes_with_mostly_single_transcripts": int(

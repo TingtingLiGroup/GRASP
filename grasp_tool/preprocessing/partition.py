@@ -19,6 +19,7 @@ from sklearn.neighbors import NearestNeighbors
 from sklearn.cluster import SpectralClustering
 import multiprocessing as mp
 import networkx as nx
+import shapely
 
 # import ot
 from matplotlib.patches import PathPatch
@@ -37,23 +38,17 @@ def classify_center_points_with_edge(
         )
     )
     polygon = Polygon(polygon_coords)
-    classifications = []
-    for idx, point in enumerate(center_points):
-        if is_edge[idx]:
-            classifications.append("edge")
-            continue
-        point_geom = Point(point)
-        if polygon.contains(point_geom):
-            classifications.append("inside")
-        elif polygon.touches(point_geom):
-            classifications.append("boundary")
-        else:
-            distance_to_boundary = polygon.boundary.distance(point_geom)
-            if distance_to_boundary <= epsilon:
-                classifications.append("boundary")
-            else:
-                classifications.append("outside")
-    return classifications
+    point_array = np.asarray(center_points, dtype=float)
+    point_geometries = shapely.points(point_array)
+    inside = shapely.contains(polygon, point_geometries)
+    boundary = shapely.touches(polygon, point_geometries)
+    distances = shapely.distance(polygon.boundary, point_geometries)
+
+    classifications = np.full(len(point_array), "outside", dtype=object)
+    classifications[inside] = "inside"
+    classifications[boundary | ((~inside) & (distances <= epsilon))] = "boundary"
+    classifications[np.asarray(is_edge, dtype=bool)] = "edge"
+    return classifications.tolist()
 
 
 def save_node_data_to_csv_old(
@@ -113,37 +108,42 @@ def save_node_data_to_csv_old(
 
 # Count points per sector/ring (shared centroid locations)
 def count_points_in_areas_same(df, n_sectors, m_rings, r):
-    df["theta"] = np.arctan2(df["y_c_s"], df["x_c_s"])
-    df["radius"] = np.sqrt(df["x_c_s"] ** 2 + df["y_c_s"] ** 2)
-    count_matrix = np.zeros((m_rings, n_sectors))
+    x_values = df["x_c_s"].to_numpy()
+    y_values = df["y_c_s"].to_numpy()
+    theta = np.arctan2(y_values, x_values)
+    radius = np.sqrt(x_values**2 + y_values**2)
     theta_edges = np.linspace(-np.pi, np.pi, n_sectors + 1)
     radius_edges = np.linspace(0, r, m_rings + 1)
-    center_points = []
-    point_counts = []
-    is_virtual = []
-    is_edge = []
-    for i in range(m_rings):
-        for j in range(n_sectors):
-            points_in_ring = df[
-                (df["radius"] > radius_edges[i]) & (df["radius"] <= radius_edges[i + 1])
-            ]
-            points_in_sector = points_in_ring[
-                (points_in_ring["theta"] >= theta_edges[j])
-                & (points_in_ring["theta"] < theta_edges[j + 1])
-            ]
-            count = len(points_in_sector)
-            count_matrix[i, j] = count
-            point_counts.append(count)
-            theta_center = (theta_edges[j] + theta_edges[j + 1]) / 2
-            radius_center = (radius_edges[i] + radius_edges[i + 1]) / 2
-            x_center, y_center = (
-                radius_center * np.cos(theta_center),
-                radius_center * np.sin(theta_center),
-            )
-            weight = count if count > 0 else 1
-            center_points.append((x_center, y_center))
-            is_virtual.append(False if count > 0 else True)
-            is_edge.append(True if i == m_rings - 1 or i == m_rings - 2 else False)
+
+    # Radius bins are left-open/right-closed; angle bins are left-closed/right-open.
+    ring_indices = np.searchsorted(radius_edges, radius, side="left") - 1
+    sector_indices = np.searchsorted(theta_edges, theta, side="right") - 1
+    valid = (
+        (ring_indices >= 0)
+        & (ring_indices < m_rings)
+        & (sector_indices >= 0)
+        & (sector_indices < n_sectors)
+    )
+    flat_indices = ring_indices[valid] * n_sectors + sector_indices[valid]
+    integer_counts = np.bincount(
+        flat_indices, minlength=m_rings * n_sectors
+    ).reshape(m_rings, n_sectors)
+    count_matrix = integer_counts.astype(float)
+
+    theta_centers = (theta_edges[:-1] + theta_edges[1:]) / 2
+    radius_centers = (radius_edges[:-1] + radius_edges[1:]) / 2
+    theta_grid, radius_grid = np.meshgrid(theta_centers, radius_centers)
+    center_points = list(
+        zip(
+            (radius_grid * np.cos(theta_grid)).ravel().tolist(),
+            (radius_grid * np.sin(theta_grid)).ravel().tolist(),
+        )
+    )
+    point_counts = integer_counts.ravel().tolist()
+    is_virtual = (integer_counts.ravel() == 0).tolist()
+    is_edge = np.repeat(
+        np.arange(m_rings) >= max(0, m_rings - 2), n_sectors
+    ).tolist()
     return count_matrix, center_points, point_counts, is_virtual, is_edge
 
 
@@ -355,55 +355,60 @@ def save_node_data_to_csv(
     node_counts,
     k,
     nuclear_positions,
+    write_distance_matrix=True,
 ):
-    node_data = []
-    for idx, (x, y) in enumerate(center_points):
-        node_data.append(
-            {
-                "node_id": idx,
-                "x": x,
-                "y": y,
-                "is_virtual": 1 if is_virtual[idx] else 0,
-                "is_edge": 1 if is_edge[idx] else 0,  # Added is_edge column
-                "count": node_counts[idx],
-                "nuclear_position": nuclear_positions[idx],
-            }
-        )
-    node_df = pd.DataFrame(node_data)
-    node_df.to_csv(os.path.join(plot_dir, f"{gene}_node_matrix.csv"), index=False)
-    num_nodes = len(center_points)
-    distance_matrix = np.zeros((num_nodes, num_nodes))
-
-    for i in range(num_nodes):
-        for j in range(num_nodes):
-            if i == j:
-                distance_matrix[i, j] = 0
-            elif is_virtual[i] and is_virtual[j]:
-                # distance_matrix[i, j] = np.inf
-                distance_matrix[i, j] = 1e6
-            elif is_virtual[i] or is_virtual[j]:
-                # distance_matrix[i, j] = np.inf
-                distance_matrix[i, j] = 1e6
-            else:
-                distance_matrix[i, j] = np.linalg.norm(
-                    np.array(center_points[i]) - np.array(center_points[j])
-                )
-    distance_matrix = pd.DataFrame(distance_matrix)
-    distance_matrix.to_csv(
-        os.path.join(plot_dir, f"{gene}_dis_matrix.csv"), index=False
+    point_array = np.asarray(center_points, dtype=float)
+    virtual_mask = np.asarray(is_virtual, dtype=bool)
+    num_nodes = len(point_array)
+    node_df = pd.DataFrame(
+        {
+            "node_id": np.arange(num_nodes),
+            "x": point_array[:, 0],
+            "y": point_array[:, 1],
+            "is_virtual": virtual_mask.astype(int),
+            "is_edge": np.asarray(is_edge, dtype=int),
+            "count": node_counts,
+            "nuclear_position": nuclear_positions,
+        }
     )
+    node_df.to_csv(os.path.join(plot_dir, f"{gene}_node_matrix.csv"), index=False)
+
+    if write_distance_matrix:
+        point_differences = point_array[:, np.newaxis, :] - point_array[np.newaxis, :, :]
+        distance_values = np.linalg.norm(point_differences, axis=2)
+        virtual_pairs = virtual_mask[:, np.newaxis] | virtual_mask[np.newaxis, :]
+        distance_values[virtual_pairs] = 1e6
+        np.fill_diagonal(distance_values, 0)
+        pd.DataFrame(distance_values).to_csv(
+            os.path.join(plot_dir, f"{gene}_dis_matrix.csv"), index=False
+        )
+
     adjacency_matrix = np.zeros((num_nodes, num_nodes), dtype=int)
-    for i in range(num_nodes):
-        if is_virtual[i]:
-            continue
-        nearest_indices = np.argsort(distance_matrix[i])[: k + 1]
-        for idx in nearest_indices:
-            if not is_virtual[idx]:
-                adjacency_matrix[i, idx] = 1
-    np.fill_diagonal(adjacency_matrix, 0)
-    adjacency_matrix = pd.DataFrame(adjacency_matrix)
-    adjacency_matrix.to_csv(
-        os.path.join(plot_dir, f"{gene}_adj_matrix.csv"), index=False
+    real_indices = np.flatnonzero(~virtual_mask)
+    if len(real_indices) > 1 and k > 0:
+        real_points = point_array[real_indices]
+        point_differences = (
+            real_points[:, np.newaxis, :] - point_array[np.newaxis, :, :]
+        )
+        real_distances = np.linalg.norm(point_differences, axis=2)
+        real_distances[:, virtual_mask] = 1e6
+        nearest_real = np.argsort(real_distances, axis=1)[
+            :, : min(k + 1, num_nodes)
+        ]
+        source_indices = np.repeat(real_indices, nearest_real.shape[1])
+        target_indices = nearest_real.ravel()
+        real_edges = ~virtual_mask[target_indices]
+        adjacency_matrix[source_indices[real_edges], target_indices[real_edges]] = 1
+        np.fill_diagonal(adjacency_matrix, 0)
+
+    adjacency_path = os.path.join(plot_dir, f"{gene}_adj_matrix.csv")
+    np.savetxt(
+        adjacency_path,
+        adjacency_matrix,
+        delimiter=",",
+        fmt="%d",
+        header=",".join(str(index) for index in range(num_nodes)),
+        comments="",
     )
 
 

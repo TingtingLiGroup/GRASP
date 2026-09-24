@@ -21,6 +21,72 @@ from datetime import datetime
 from scipy.interpolate import interp1d, splprep, splev
 
 
+_REGISTER_WORKER_STATE = {}
+
+
+def _initialize_register_worker(
+    df_gbC,
+    cell_mask_gbC,
+    nuclear_boundary,
+    ntanbin_dict,
+    epsilon,
+    clip_to_cell,
+    remove_outliers,
+    verbose,
+):
+    """Initialize process-local registration state once per worker."""
+    global _REGISTER_WORKER_STATE
+    _REGISTER_WORKER_STATE = {
+        "df_gbC": df_gbC,
+        "cell_mask_gbC": cell_mask_gbC,
+        "nuclear_boundary": nuclear_boundary,
+        "ntanbin_dict": ntanbin_dict,
+        "epsilon": epsilon,
+        "clip_to_cell": clip_to_cell,
+        "remove_outliers": remove_outliers,
+        "verbose": verbose,
+    }
+
+
+def _process_chunk_from_worker_state(chunk):
+    cell_results = process_chunk(chunk, **_REGISTER_WORKER_STATE)
+    if not cell_results:
+        return None
+
+    cell_frames = []
+    nuclear_frames = []
+    radii = {}
+    nuclear_stats = []
+    for cell_frame, nuclear_frame, cell_radius in cell_results:
+        cell = cell_frame["cell"].iloc[0]
+        cell_frames.append(cell_frame)
+        nuclear_frames.append(nuclear_frame)
+        radii[cell] = cell_radius
+
+        num_points = int(len(nuclear_frame))
+        exceed_percent = 0.0
+        exceed_count = 0
+        if num_points > 0 and "exceeds_boundary" in nuclear_frame.columns:
+            exceed_series = nuclear_frame["exceeds_boundary"]
+            exceed_percent = float(exceed_series.mean()) * 100.0
+            exceed_count = int(exceed_series.sum())
+        nuclear_stats.append(
+            {
+                "cell": cell,
+                "exceed_percent": exceed_percent,
+                "exceed_count": exceed_count,
+                "num_nuclear_points": num_points,
+            }
+        )
+
+    return (
+        pd.concat(cell_frames),
+        pd.concat(nuclear_frames),
+        radii,
+        pd.DataFrame(nuclear_stats),
+    )
+
+
 def interpolate_boundary_points(
     cell_boundary_dict, target_points_per_cell=100, method="spline", smooth_factor=0
 ):
@@ -524,10 +590,11 @@ def chunk_list(data_list, chunk_size):  # Split a list into chunks.
 def process_chunk(
     chunk,
     df_gbC,
-    cell_mask_df,
     nuclear_boundary,
     ntanbin_dict,
     epsilon,
+    cell_mask_df=None,
+    cell_mask_gbC=None,
     clip_to_cell=True,
     remove_outliers=False,
     verbose=False,
@@ -571,11 +638,22 @@ def process_chunk(
 
         t = df_c.type.iloc[0]  # Cell type.
 
-        # Try different lookup strategies (cell id types may differ).
-        mask_df_c = cell_mask_df[cell_mask_df.cell == c].copy()
+        # Indexed lookup avoids scanning the full mask table for every cell.
+        if cell_mask_gbC is not None:
+            try:
+                mask_df_c = cell_mask_gbC.get_group(c).copy()
+            except KeyError:
+                mask_df_c = pd.DataFrame()
+        elif cell_mask_df is not None:
+            mask_df_c = cell_mask_df[cell_mask_df.cell == c].copy()
+        else:
+            raise ValueError("cell_mask_df or cell_mask_gbC is required")
+
         if len(mask_df_c) == 0:
             # Try casting cell ids to match.
-            if isinstance(c, str):
+            if cell_mask_df is None:
+                pass
+            elif isinstance(c, str):
                 if verbose:
                     print(f"Converting cell {c} to string")
                 mask_df_c = cell_mask_df[cell_mask_df.cell.astype(str) == c].copy()
@@ -816,6 +894,7 @@ def register_cells_and_nuclei_parallel_chunked_constrained(
     epsilon=1e-10,
     nc_demo=None,
     chunk_size=5,
+    processes=4,
     clip_to_cell=True,
     remove_outliers=False,
     verbose=True,
@@ -828,13 +907,11 @@ def register_cells_and_nuclei_parallel_chunked_constrained(
     if nc_demo is None:
         nc_demo = len(cell_list_all)
 
-    # Validate inputs first.
-    missing_cells_mask = [
-        c for c in cell_list_all[:nc_demo] if c not in cell_mask_df["cell"].unique()
-    ]
-    missing_cells_nuclear = [
-        c for c in cell_list_all[:nc_demo] if c not in nuclear_boundary.keys()
-    ]
+    requested_cells = cell_list_all[:nc_demo]
+    mask_cells = set(cell_mask_df["cell"].unique())
+    nuclear_cells = set(nuclear_boundary)
+    missing_cells_mask = [c for c in requested_cells if c not in mask_cells]
+    missing_cells_nuclear = [c for c in requested_cells if c not in nuclear_cells]
 
     if missing_cells_mask or missing_cells_nuclear:
         print(f"Warning: Found {len(missing_cells_mask)} cells missing in mask_df")
@@ -845,43 +922,41 @@ def register_cells_and_nuclei_parallel_chunked_constrained(
         # Filter out cells with missing inputs.
         valid_cells = [
             c
-            for c in cell_list_all[:nc_demo]
-            if c in cell_mask_df["cell"].unique() and c in nuclear_boundary.keys()
+            for c in requested_cells
+            if c in mask_cells and c in nuclear_cells
         ]
         print(f"Proceeding with {len(valid_cells)} valid cells (originally {nc_demo})")
         cell_list_for_processing = valid_cells
     else:
-        cell_list_for_processing = cell_list_all[:nc_demo]
+        cell_list_for_processing = requested_cells
 
     # Group input table and create processing chunks.
-    df_gbC = data_df.groupby("cell", observed=False)
+    df_gbC = data_df.groupby("cell", observed=True, sort=False)
+    cell_mask_gbC = cell_mask_df.groupby("cell", observed=True, sort=False)
     chunks = list(chunk_list(cell_list_for_processing, chunk_size))
 
-    # Create multiprocessing pool.
-    pool = Pool(processes=min(4, cpu_count() - 2))
-    process_chunk_partial = partial(
-        process_chunk,
-        df_gbC=df_gbC,
-        cell_mask_df=cell_mask_df,
-        nuclear_boundary=nuclear_boundary,
-        ntanbin_dict=ntanbin_dict,
-        epsilon=epsilon,
-        clip_to_cell=clip_to_cell,
-        remove_outliers=remove_outliers,
-        verbose=verbose,
-    )
-
-    # Parallel processing.
-    results = list(
-        tqdm(
-            pool.imap(process_chunk_partial, chunks),
-            total=len(chunks),
-            desc="Processing chunks in parallel",
+    worker_count = max(1, min(int(processes), cpu_count()))
+    with Pool(
+        processes=worker_count,
+        initializer=_initialize_register_worker,
+        initargs=(
+            df_gbC,
+            cell_mask_gbC,
+            nuclear_boundary,
+            ntanbin_dict,
+            epsilon,
+            clip_to_cell,
+            remove_outliers,
+            verbose,
+        ),
+    ) as pool:
+        results = list(
+            tqdm(
+                pool.imap(_process_chunk_from_worker_state, chunks),
+                total=len(chunks),
+                desc="Processing chunks in parallel",
+            )
         )
-    )
-
-    pool.close()
-    pool.join()
 
     # Aggregate results.
     all_cell_dfs = []
@@ -890,34 +965,22 @@ def register_cells_and_nuclei_parallel_chunked_constrained(
     all_nuclear_stats = []
 
     for result_chunk in results:
-        for df_c_registered, nuclear_boundary_c_registered, cell_radius in result_chunk:
-            all_cell_dfs.append(df_c_registered)
-            all_nuclear_dfs.append(nuclear_boundary_c_registered)
-            all_radii.update({df_c_registered["cell"].iloc[0]: cell_radius})
-            # Per-cell nuclear boundary stats
-            exceed_percent = 0.0
-            exceed_count = 0
-            num_points = int(len(nuclear_boundary_c_registered))
-            if (
-                num_points > 0
-                and "exceeds_boundary" in nuclear_boundary_c_registered.columns
-            ):
-                exceed_series = nuclear_boundary_c_registered["exceeds_boundary"]
-                exceed_percent = float(exceed_series.mean()) * 100.0
-                exceed_count = int(exceed_series.sum())
-
-            all_nuclear_stats.append(
-                {
-                    "cell": df_c_registered["cell"].iloc[0],
-                    "exceed_percent": exceed_percent,
-                    "exceed_count": exceed_count,
-                    "num_nuclear_points": num_points,
-                }
-            )
+        if result_chunk is None:
+            continue
+        (
+            cell_chunk,
+            nuclear_chunk,
+            radii_chunk,
+            nuclear_stats_chunk,
+        ) = result_chunk
+        all_cell_dfs.append(cell_chunk)
+        all_nuclear_dfs.append(nuclear_chunk)
+        all_radii.update(radii_chunk)
+        all_nuclear_stats.append(nuclear_stats_chunk)
 
     cell_df_registered = pd.concat(all_cell_dfs)
     nuclear_boundary_df_registered = pd.concat(all_nuclear_dfs)
-    cell_nuclear_stats = pd.DataFrame(all_nuclear_stats)
+    cell_nuclear_stats = pd.concat(all_nuclear_stats, ignore_index=True)
 
     # Print summary stats.
     if verbose:
